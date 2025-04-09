@@ -53,7 +53,6 @@ function AntiCrash:CleanExcessParticles()
         for i = CONFIG.MaxParticles + 1, #particleSystems do
             particleSystems[i].Enabled = false
         end
-        print("[AntiCrash] Disabled " .. (#particleSystems - CONFIG.MaxParticles) .. " particle systems")
     end
 end
 
@@ -63,12 +62,14 @@ function AntiCrash:LimitRenderDistance()
         if part:IsA("BasePart") and not part:IsDescendantOf(LocalPlayer.Character) then
             local distance = (part.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
             if distance > CONFIG.MaxRenderDistance then
-                if part:FindFirstChild("OriginalTransparency") == nil then
-                    local originalTransparency = Instance.new("NumberValue")
-                    originalTransparency.Name = "OriginalTransparency"
-                    originalTransparency.Value = part.Transparency
-                    originalTransparency.Parent = part
-                    part.Transparency = 1
+                if not part:FindFirstChild("OriginalTransparency") then
+                    local success = pcall(function()
+                        local originalTransparency = Instance.new("NumberValue")
+                        originalTransparency.Name = "OriginalTransparency"
+                        originalTransparency.Value = part.Transparency
+                        originalTransparency.Parent = part
+                        part.Transparency = 1
+                    end)
                 end
             else
                 local originalTransparency = part:FindFirstChild("OriginalTransparency")
@@ -102,7 +103,6 @@ function AntiCrash:MonitorFramerate()
 end
 
 function AntiCrash:EmergencyOptimize()
-    print("[AntiCrash] Emergency optimization triggered - FPS: " .. math.floor(frameRateMonitor.currentFPS))
     local oldRenderDistance = CONFIG.MaxRenderDistance
     CONFIG.MaxRenderDistance = CONFIG.MaxRenderDistance * 0.5
     self:LimitRenderDistance()
@@ -159,7 +159,6 @@ function AntiCrash:ProtectGlobalEnvironment()
 end
 
 function AntiCrash:Initialize()
-    print("[AntiCrash] Initializing anti-crash protection...")
     self:ProtectGlobalEnvironment()
     RunService.Heartbeat:Connect(function()
         SafeCall(function() self:MonitorFramerate() end)
@@ -171,7 +170,6 @@ function AntiCrash:Initialize()
             SafeCall(function() self:MonitorMemory() end)
         end
     end)
-    print("[AntiCrash] Protection active")
 end
 
 AntiCrash:Initialize()
