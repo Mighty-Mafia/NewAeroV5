@@ -1,3 +1,6 @@
+-- still in beta lmao (like 200 update)
+-- update don april 9 2025
+
 local AntiCrash = {}
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
