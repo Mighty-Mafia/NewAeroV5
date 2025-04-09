@@ -1,3 +1,11 @@
+local old_require = require
+getgenv().require = function(path)
+    setthreadidentity(2)
+    local _ = old_require(path)
+    setthreadidentity(8)
+    return _
+end
+
 local whitelist_url = "https://raw.githubusercontent.com/wrealaero/whitelistcheck/main/whitelist.json"
 local player = game.Players.LocalPlayer
 local userId = tostring(player.UserId)
