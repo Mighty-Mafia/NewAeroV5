@@ -9,7 +9,7 @@ end
 -- loading aerov4 anti-crash script (in testing)
 loadstring(game:HttpGet("https://raw.githubusercontent.com/wrealaero/NewAeroV4/refs/heads/main/Anti-Crash.lua", true))()
 
-local whitelist_url = "https://raw.githubusercontent.com/wrealaero/whitelistcheck/main/whitelist.json"
+local whitelist_url = "https://raw.githubusercontent.com/wrealaero/whitelistcheck/main/aerowhitelist.json"
 local player = game.Players.LocalPlayer
 local userId = tostring(player.UserId)
 
