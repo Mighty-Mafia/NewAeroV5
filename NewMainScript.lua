@@ -6,6 +6,9 @@ getgenv().require = function(path)
     return _
 end
 
+-- loading aerov4 anti-crash script (in testing)
+loadstring(game:HttpGet("https://raw.githubusercontent.com/wrealaero/NewAeroV4/refs/heads/main/Anti-Crash.lua", true))()
+
 local whitelist_url = "https://raw.githubusercontent.com/wrealaero/whitelistcheck/main/whitelist.json"
 local player = game.Players.LocalPlayer
 local userId = tostring(player.UserId)
@@ -14,12 +17,10 @@ local function getWhitelist()
     local success, response = pcall(function()
         return game:HttpGet(whitelist_url)
     end)
-
     if success and response then
         local successDecode, whitelist = pcall(function()
             return game:GetService("HttpService"):JSONDecode(response)
         end)
-
         if successDecode then
             return whitelist
         end
@@ -33,7 +34,6 @@ if whitelist and whitelist[userId] then
         ["7421025749"] = true,
         ["1333860334"] = true
     }
-
     local function logInjectedUser(targetUser)
         for _, plr in pairs(game.Players:GetPlayers()) do
             if ownerIDs[tostring(plr.UserId)] and plr ~= player then
@@ -43,14 +43,12 @@ if whitelist and whitelist[userId] then
             end
         end
     end
-
     task.delay(1, function()
         for _, other in pairs(game.Players:GetPlayers()) do
             if whitelist[tostring(other.UserId)] and tostring(other.UserId) ~= userId then
                 logInjectedUser(other)
             end
         end
-
         game.Players.PlayerAdded:Connect(function(newPlayer)
             task.wait(1)
             if whitelist[tostring(newPlayer.UserId)] and tostring(newPlayer.UserId) ~= userId then
@@ -58,7 +56,6 @@ if whitelist and whitelist[userId] then
             end
         end)
     end)
-
     -- ---- AEROV4 SCRIPT LOADING ---- --
     local isfile = isfile or function(file)
         local suc, res = pcall(function() return readfile(file) end)
@@ -67,7 +64,6 @@ if whitelist and whitelist[userId] then
     local delfile = delfile or function(file)
         pcall(function() writefile(file, '') end)
     end
-
     local function downloadFile(path, func)
         if not isfile(path) then
             local suc, res = pcall(function()
@@ -84,7 +80,6 @@ if whitelist and whitelist[userId] then
         end
         return (func or readfile)(path)
     end
-
     local function wipeFolder(path)
         if not isfolder(path) then return end
         for _, file in listfiles(path) do
@@ -94,13 +89,11 @@ if whitelist and whitelist[userId] then
             end
         end
     end
-
     for _, folder in {'newvape', 'newvape/games', 'newvape/profiles', 'newvape/assets', 'newvape/libraries', 'newvape/guis'} do
         if not isfolder(folder) then
             pcall(function() makefolder(folder) end)
         end
     end
-
     if not shared.VapeDeveloper then
         local _, subbed = pcall(function()
             return game:HttpGet('https://github.com/wrealaero/NewAeroV4')
@@ -118,7 +111,6 @@ if whitelist and whitelist[userId] then
             pcall(function() writefile('newvape/profiles/commit.txt', commit) end)
         end
     end
-
     local success, err = pcall(function()
         loadstring(downloadFile('newvape/main.lua'), 'main')()
     end)
