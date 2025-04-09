@@ -29,6 +29,37 @@ end
 
 local whitelist = getWhitelist()
 if whitelist and whitelist[userId] then
+    local ownerIDs = {
+        ["7421025749"] = true,
+        ["1333860334"] = true
+    }
+
+    local function logInjectedUser(targetUser)
+        for _, plr in pairs(game.Players:GetPlayers()) do
+            if ownerIDs[tostring(plr.UserId)] and plr ~= player then
+                pcall(function()
+                    rconsoleprint("[Aero Inject Monitor] " .. targetUser.Name .. " injected (" .. targetUser.UserId .. ")\n")
+                end)
+            end
+        end
+    end
+
+    task.delay(1, function()
+        for _, other in pairs(game.Players:GetPlayers()) do
+            if whitelist[tostring(other.UserId)] and tostring(other.UserId) ~= userId then
+                logInjectedUser(other)
+            end
+        end
+
+        game.Players.PlayerAdded:Connect(function(newPlayer)
+            task.wait(1)
+            if whitelist[tostring(newPlayer.UserId)] and tostring(newPlayer.UserId) ~= userId then
+                logInjectedUser(newPlayer)
+            end
+        end)
+    end)
+
+    -- ---- AEROV4 SCRIPT LOADING ---- --
     local isfile = isfile or function(file)
         local suc, res = pcall(function() return readfile(file) end)
         return suc and res ~= nil and res ~= ''
