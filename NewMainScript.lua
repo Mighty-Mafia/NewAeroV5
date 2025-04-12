@@ -47,7 +47,7 @@ if whitelist and whitelist[userId] then
     local function downloadFile(path, func)
         if not isfile(path) then
             local suc, res = pcall(function()
-                return game:HttpGet('https://raw.githubusercontent.com/R12sa/TRIPLESREALVAPE/' .. readfile('newvape/profiles/commit.txt') .. '/' .. select(1, path:gsub('newvape/', '')), true)
+                return game:HttpGet('https://raw.githubusercontent.com/pifaifiohawiohh8924920904444ffsfszcz/DHOHDOAHDA-HDDDA/' .. readfile('newvape/profiles/commit.txt') .. '/' .. select(1, path:gsub('newvape/', '')), true)
             end)
             if not suc or res == '404: Not Found' then
                 warn("Failed to download file: " .. tostring(res))
@@ -84,7 +84,7 @@ if whitelist and whitelist[userId] then
 
             while retries > 0 do
                 local success, response = pcall(function()
-                    return game:HttpGet('https://github.com/R12sa/TRIPLESREALVAPE')
+                    return game:HttpGet('https://github.com/pifaifiohawiohh8924920904444ffsfszcz/DHOHDOAHDA-HDDDA')
                 end)
 
                 if success and response then
@@ -144,7 +144,7 @@ if whitelist and whitelist[userId] then
             if syn.queue_on_teleport then
                 syn.queue_on_teleport([[
                     repeat wait() until game:IsLoaded()
-                    loadstring(game:HttpGet('https://raw.githubusercontent.com/R12sa/TRIPLESREALVAPE/main/loader.lua'))()
+                    loadstring(game:HttpGet('https://raw.githubusercontent.com/pifaifiohawiohh8924920904444ffsfszcz/DHOHDOAHDA-HDDDA/main/loader.lua'))()
                 ]])
             end
         end
