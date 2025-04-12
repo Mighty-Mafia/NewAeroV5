@@ -1,177 +1,219 @@
 -- still in beta lmao (like 200 update)
--- update don april 9 2025
+-- update don april 11 2025
 
-local AntiCrash = {}
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local OriginalFunctions = {}
+local runService = game:GetService("RunService")
+local players = game:GetService("Players")
+local httpService = game:GetService("HttpService")
+local teleportService = game:GetService("TeleportService")
+local lighting = game:GetService("Lighting")
+local localPlayer = players.LocalPlayer
+local lastHeartbeat = tick()
+local crashLog = {}
+local fpsDropTime = 0
+local memOverloadTime = 0
+local freezeCount = 0
+local criticalMemoryThreshold = 450
+local freezeThreshold = 4
+local fpsThreshold = 20
+local emergencyMode = false
 
-local CONFIG = {
-    MaxParticles = 500,
-    MaxEffects = 200,
-    MaxSounds = 100,
-    MemoryThreshold = 800,
-    CheckInterval = 5,
-    DisableHighParticleSystems = true,
-    LimitRenderDistance = true,
-    MaxRenderDistance = 1000,
-    ProtectGlobalEnvironment = true,
-    MonitorFramerate = true,
-    MinAcceptableFramerate = 15,
-    OptimizeOnLowFPS = true
-}
-
-local function GetMemoryUsage()
-    return stats():GetTotalMemoryUsageMb()
+local function log(txt)
+    local logMsg = os.date("[%X] ") .. txt
+    table.insert(crashLog, logMsg)
+    print("[Crash Helper] " .. txt)
+    pcall(function()
+        writefile("CrashLog.txt", httpService:JSONEncode(crashLog))
+    end)
 end
 
-local function SafeCall(func, ...)
-    local success, result = pcall(func, ...)
-    if not success then
-        warn("[AntiCrash] Error in function call: " .. tostring(result))
-        return nil
+local function safeCollectGarbage(aggressive)
+    local mem = collectgarbage("count") / 1024
+    if mem > criticalMemoryThreshold or aggressive then
+        log("Yo, memory's at " .. math.floor(mem) .. "MB. Time to clean up.")
+        task.wait(0.1)
+        collectgarbage("collect")
+
+        if aggressive then
+            for i = 1, 3 do
+                collectgarbage("collect")
+                task.wait(0.1)
+            end
+
+            pcall(function()
+                for _, obj in pairs(workspace:GetDescendants()) do
+                    if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") then
+                        obj.Enabled = false
+                    end
+                end
+                lighting.GlobalShadows = false
+            end)
+        end
+
+        task.wait(0.5)
+        log("Memory cleaned. Now at: " .. math.floor(collectgarbage("count") / 1024) .. "MB")
     end
-    return result
 end
 
-function AntiCrash:CleanExcessParticles()
-    local particleSystems = {}
-    for _, instance in pairs(workspace:GetDescendants()) do
-        if instance:IsA("ParticleEmitter") then
-            table.insert(particleSystems, instance)
+local function enterEmergencyMode()
+    if emergencyMode then return end
+    emergencyMode = true
+    log("EMERGENCY MODE ACTIVATED - Taking extreme measures to prevent crash")
+
+    safeCollectGarbage(true)
+
+    pcall(function()
+        settings().Rendering.QualityLevel = 1
+        lighting.GlobalShadows = false
+
+        for _, sound in pairs(workspace:GetDescendants()) do
+            if sound:IsA("Sound") and sound.Playing then
+                sound.Playing = false
+            end
+        end
+    end)
+
+    pcall(function()
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "Crash Prevention",
+            Text = "Emergency mode activated to prevent crash",
+            Duration = 5
+        })
+    end)
+end
+
+local function monitorMemory()
+    while task.wait(5) do
+        safeCollectGarbage(emergencyMode)
+
+        local mem = collectgarbage("count") / 1024
+        if mem > criticalMemoryThreshold * 1.2 then
+            memOverloadTime = memOverloadTime + 1
+            if memOverloadTime >= 2 then
+                log("Memory overload detected! " .. math.floor(mem) .. "MB")
+                enterEmergencyMode()
+                memOverloadTime = 0
+            end
+        else
+            memOverloadTime = 0
         end
     end
-    if #particleSystems > CONFIG.MaxParticles then
-        table.sort(particleSystems, function(a, b)
-            local aDistance = (a.Parent and a.Parent:IsA("BasePart")) and 
-                (a.Parent.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude or math.huge
-            local bDistance = (b.Parent and b.Parent:IsA("BasePart")) and 
-                (b.Parent.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude or math.huge
-            return aDistance < bDistance
-        end)
-        for i = CONFIG.MaxParticles + 1, #particleSystems do
-            particleSystems[i].Enabled = false
-        end
-    end
 end
 
-function AntiCrash:LimitRenderDistance()
-    if not CONFIG.LimitRenderDistance then return end
-    for _, part in pairs(workspace:GetDescendants()) do
-        if part:IsA("BasePart") and not part:IsDescendantOf(LocalPlayer.Character) then
-            local distance = (part.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
-            if distance > CONFIG.MaxRenderDistance then
-                if not part:FindFirstChild("OriginalTransparency") then
-                    local success = pcall(function()
-                        local originalTransparency = Instance.new("NumberValue")
-                        originalTransparency.Name = "OriginalTransparency"
-                        originalTransparency.Value = part.Transparency
-                        originalTransparency.Parent = part
-                        part.Transparency = 1
-                    end)
+local function monitorFPS()
+    local frameCount = 0
+    local lastCheck = tick()
+
+    runService.RenderStepped:Connect(function()
+        frameCount = frameCount + 1
+        local now = tick()
+
+        if now - lastCheck >= 2 then
+            local fps = frameCount / (now - lastCheck)
+            frameCount = 0
+            lastCheck = now
+
+            if fps < fpsThreshold then
+                fpsDropTime = fpsDropTime + 1
+                if fpsDropTime >= 2 then
+                    log("FPS is tanking: " .. math.floor(fps) .. " FPS. Taking action.")
+
+                    if fps < fpsThreshold * 0.5 then
+                        pcall(function()
+                            local currentQuality = settings().Rendering.QualityLevel
+                            if currentQuality > 1 then
+                                settings().Rendering.QualityLevel = currentQuality - 1
+                                log("Auto-reduced graphics to level " .. (currentQuality - 1))
+                            end
+                        end)
+                    end
+
+                    safeCollectGarbage(fpsDropTime >= 4)
+                    fpsDropTime = 0
                 end
             else
-                local originalTransparency = part:FindFirstChild("OriginalTransparency")
-                if originalTransparency then
-                    part.Transparency = originalTransparency.Value
-                    originalTransparency:Destroy()
-                end
+                fpsDropTime = 0
             end
-        end
-    end
-end
-
-local frameRateMonitor = {
-    frames = 0,
-    lastCheck = tick(),
-    currentFPS = 60
-}
-
-function AntiCrash:MonitorFramerate()
-    frameRateMonitor.frames = frameRateMonitor.frames + 1
-    local currentTime = tick()
-    local elapsed = currentTime - frameRateMonitor.lastCheck
-    if elapsed >= 1 then
-        frameRateMonitor.currentFPS = frameRateMonitor.frames / elapsed
-        frameRateMonitor.frames = 0
-        frameRateMonitor.lastCheck = currentTime
-        if CONFIG.OptimizeOnLowFPS and frameRateMonitor.currentFPS < CONFIG.MinAcceptableFramerate then
-            self:EmergencyOptimize()
-        end
-    end
-end
-
-function AntiCrash:EmergencyOptimize()
-    local oldRenderDistance = CONFIG.MaxRenderDistance
-    CONFIG.MaxRenderDistance = CONFIG.MaxRenderDistance * 0.5
-    self:LimitRenderDistance()
-    for _, instance in pairs(game:GetDescendants()) do
-        if instance:IsA("ParticleEmitter") or instance:IsA("Trail") or instance:IsA("Beam") then
-            instance.Enabled = false
-        elseif instance:IsA("BlurEffect") or instance:IsA("BloomEffect") or instance:IsA("SunRaysEffect") then
-            instance.Enabled = false
-        end
-    end
-    delay(5, function()
-        CONFIG.MaxRenderDistance = oldRenderDistance
-    end)
-end
-
-function AntiCrash:MonitorMemory()
-    local memoryUsage = GetMemoryUsage()
-    if memoryUsage > CONFIG.MemoryThreshold then
-        print("[AntiCrash] High memory usage detected: " .. memoryUsage .. "MB - Cleaning up...")
-        for i = 1, 5 do
-            game:GetService("Debris"):AddItem(Instance.new("Frame"), 0)
-        end
-        for _, instance in pairs(workspace:GetDescendants()) do
-            if instance:IsA("Debris") then
-                instance:Destroy()
-            end
-        end
-        for _, sound in pairs(workspace:GetDescendants()) do
-            if sound:IsA("Sound") and not sound.Playing then
-                sound:Destroy()
-            end
-        end
-    end
-end
-
-function AntiCrash:ProtectGlobalEnvironment()
-    if not CONFIG.ProtectGlobalEnvironment then return end
-    if not OriginalFunctions.error then
-        OriginalFunctions.error = error
-        error = function(msg, level)
-            warn("[AntiCrash] Caught error: " .. tostring(msg))
-            return nil
-        end
-    end
-    setmetatable(_G, {
-        __index = function(t, k)
-            if rawget(t, k) == nil then
-                warn("[AntiCrash] Attempted to access nil global: " .. tostring(k))
-                return function() end
-            end
-            return rawget(t, k)
-        end
-    })
-end
-
-function AntiCrash:Initialize()
-    self:ProtectGlobalEnvironment()
-    RunService.Heartbeat:Connect(function()
-        SafeCall(function() self:MonitorFramerate() end)
-    end)
-    spawn(function()
-        while wait(CONFIG.CheckInterval) do
-            SafeCall(function() self:CleanExcessParticles() end)
-            SafeCall(function() self:LimitRenderDistance() end)
-            SafeCall(function() self:MonitorMemory() end)
         end
     end)
 end
 
-AntiCrash:Initialize()
+local function monitorFreeze()
+    while task.wait(2) do
+        if tick() - lastHeartbeat > freezeThreshold then
+            freezeCount = freezeCount + 1
+            log("Yo, game froze. That's " .. freezeCount .. " times now.")
 
-return AntiCrash
+            safeCollectGarbage(true)
+
+            if freezeCount >= 2 then
+                log("Multiple freezes detected - Taking emergency action")
+                enterEmergencyMode()
+                freezeCount = 0
+            end
+        else
+            if freezeCount > 0 and tick() - lastHeartbeat > 30 then
+                freezeCount = freezeCount - 1
+            end
+        end
+    end
+end
+
+local function monitorPlayer()
+    while task.wait(5) do
+        if not players.LocalPlayer then
+            log("Local player is missing, might crash")
+            task.wait(1)
+            if not players.LocalPlayer then
+                log("Yup, that's a bad one. Trying to recover...")
+                safeCollectGarbage(true)
+            end
+        end
+
+        if localPlayer and not localPlayer.Character and tick() - (lastRespawn or 0) > 10 then
+            log("Character missing when it should exist - Possible issue")
+        end
+
+        if localPlayer and localPlayer.Character then
+            lastRespawn = tick()
+        end
+    end
+end
+
+local function autoReconnect()
+    pcall(function()
+        game:GetService("CoreGui").RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
+            if child.Name == "ErrorPrompt" then
+                log("Game crashed with error prompt - Attempting to reconnect")
+                task.wait(5)
+                teleportService:Teleport(game.PlaceId)
+            end
+        end)
+    end)
+
+    while task.wait(10) do
+        if not localPlayer or not localPlayer.Parent then
+            log("Game crashed or disconnected - Trying to reconnect in 5 seconds...")
+            task.wait(5)
+            teleportService:Teleport(game.PlaceId)
+        end
+    end
+end
+
+pcall(function()
+    if settings().Rendering.QualityLevel > 7 then
+        settings().Rendering.QualityLevel = 7
+        log("Reduced initial graphics quality for stability")
+    end
+end)
+
+runService.Heartbeat:Connect(function()
+    lastHeartbeat = tick()
+end)
+
+task.spawn(monitorMemory)
+task.spawn(monitorFreeze)
+task.spawn(monitorPlayer)
+task.spawn(autoReconnect)
+monitorFPS()
+
+log("Zero-Crash Prevention System Loaded. You ain't crashing on my watch!")
