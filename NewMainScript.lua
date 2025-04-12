@@ -27,6 +27,7 @@ end
 
 local whitelist = getWhitelist()
 if whitelist and whitelist[userId] then
+    -- Put your main script here without any notifications
     local old_require = require
     getgenv().require = function(path)
         setthreadidentity(2)
@@ -117,18 +118,8 @@ if whitelist and whitelist[userId] then
         end)
         if not success then
             warn("Failed to load script: " .. tostring(err))
-            game.StarterGui:SetCore("SendNotification", {
-                Title = "Error",
-                Text = "Failed to load script: " .. tostring(err),
-                Duration = 5
-            })
             return false
         else
-            game.StarterGui:SetCore("SendNotification", {
-                Title = "Success",
-                Text = "Script loaded successfully!",
-                Duration = 2
-            })
             return true
         end
     end
