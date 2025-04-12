@@ -184,6 +184,7 @@ if whitelist and whitelist[userId] then
         end
     end)
 else
+    -- Only show the notification for non-whitelisted users
     game.StarterGui:SetCore("SendNotification", {
         Title = "Fuck nah u thought",
         Text = "ur not whitelisted nn lmao",
