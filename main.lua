@@ -3,8 +3,6 @@
 repeat task.wait() until game:IsLoaded()
 if shared.vape then shared.vape:Uninject() end
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/wrealaero/NewAeroV4/main/Anti-Crash.lua"))()
-
 -- why do exploits fail to implement anything correctly? Is it really that hard?
 if identifyexecutor then
 	if table.find({'Argon', 'Wave'}, ({identifyexecutor()})[1]) then
