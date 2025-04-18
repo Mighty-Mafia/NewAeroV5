@@ -54,12 +54,8 @@ end
 local whitelist = getWhitelist()
 
 if whitelist and whitelist[userId] then
-    -- Notify user that whitelist check passed
-    game.StarterGui:SetCore("SendNotification", {
-        Title = "Access Granted",
-        Text = "Whitelist check passed. Loading script...",
-        Duration = 3
-    })
+    -- Log to console instead of notification
+    print("Access Granted: Whitelist check passed. Loading script...")
     
     local isfile = isfile or function(file)
         local suc, res = pcall(function() return readfile(file) end)
@@ -70,15 +66,11 @@ if whitelist and whitelist[userId] then
         pcall(function() writefile(file, '') end)
     end
     
-    -- Improved download function with progress tracking
+    -- Improved download function with console logging only
     local function downloadFile(path, func)
         if not isfile(path) then
-            -- Notify download start
-            game.StarterGui:SetCore("SendNotification", {
-                Title = "Downloading",
-                Text = "Downloading " .. path,
-                Duration = 2
-            })
+            -- Log to console
+            print("Downloading: " .. path)
             
             local commitPath = 'newvape/profiles/commit.txt'
             local commit = isfile(commitPath) and readfile(commitPath) or 'main'
@@ -88,11 +80,6 @@ if whitelist and whitelist[userId] then
             
             if not success or res == '404: Not Found' then
                 warn("Failed to download: " .. path)
-                game.StarterGui:SetCore("SendNotification", {
-                    Title = "Download Failed",
-                    Text = "Failed to download " .. path,
-                    Duration = 3
-                })
                 return nil
             end
             
@@ -102,12 +89,8 @@ if whitelist and whitelist[userId] then
             
             pcall(function() writefile(path, res) end)
             
-            -- Notify download complete
-            game.StarterGui:SetCore("SendNotification", {
-                Title = "Download Complete",
-                Text = "Downloaded " .. path,
-                Duration = 1
-            })
+            -- Log to console
+            print("Download Complete: " .. path)
         end
         
         return (func or readfile)(path)
@@ -135,12 +118,8 @@ if whitelist and whitelist[userId] then
             local retries = 3
             local subbed
             
-            -- Notify user about commit check
-            game.StarterGui:SetCore("SendNotification", {
-                Title = "Checking Updates",
-                Text = "Checking for latest version...",
-                Duration = 2
-            })
+            -- Log to console
+            print("Checking for latest version...")
             
             while retries > 0 do
                 local success, response = pcall(function()
@@ -162,12 +141,8 @@ if whitelist and whitelist[userId] then
                 commit = commit and #commit == 40 and commit or 'main'
                 
                 if commit == 'main' or (isfile('newvape/profiles/commit.txt') and readfile('newvape/profiles/commit.txt') or '') ~= commit then
-                    -- Notify user about folder cleanup
-                    game.StarterGui:SetCore("SendNotification", {
-                        Title = "Updating Files",
-                        Text = "Cleaning up old files...",
-                        Duration = 2
-                    })
+                    -- Log to console
+                    print("Cleaning up old files...")
                     
                     wipeFolder('newvape')
                     wipeFolder('newvape/games')
@@ -179,12 +154,8 @@ if whitelist and whitelist[userId] then
             end
         end
         
-        -- Notify user about main script loading
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "Loading",
-            Text = "Loading main script...",
-            Duration = 2
-        })
+        -- Log to console
+        print("Loading main script...")
         
         local success, err = pcall(function()
             loadstring(downloadFile('newvape/main.lua'), 'main')()
@@ -192,18 +163,9 @@ if whitelist and whitelist[userId] then
         
         if not success then
             warn("Failed to load main script: " .. tostring(err))
-            game.StarterGui:SetCore("SendNotification", {
-                Title = "Error",
-                Text = "Failed to load main script",
-                Duration = 3
-            })
             return false
         else
-            game.StarterGui:SetCore("SendNotification", {
-                Title = "Success",
-                Text = "Main script loaded successfully",
-                Duration = 2
-            })
+            print("Main script loaded successfully")
             return true
         end
     end
@@ -272,6 +234,7 @@ if whitelist and whitelist[userId] then
         end
     end)
 else
+    -- Keep only this notification
     game.StarterGui:SetCore("SendNotification", {
         Title = "Access Denied",
         Text = "You are not whitelisted",
