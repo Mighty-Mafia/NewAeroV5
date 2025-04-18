@@ -14,7 +14,7 @@ local vape
 local loadstring = function(...)
     local res, err = loadstring(...)
     if err and vape then
-        vape:CreateNotification('Vape', 'Failed to load : '..err, 30, 'alert')
+        warn('Failed to load: '..err)
     end
     return res
 end
@@ -58,6 +58,8 @@ end
 -- Improved download function with better error handling
 local function downloadFile(path, func)
     if not isfile(path) then
+        print("Downloading: " .. path)
+        
         local commitPath = 'newvape/profiles/commit.txt'
         local commit = isfile(commitPath) and readfile(commitPath) or 'main'
         
@@ -65,12 +67,12 @@ local function downloadFile(path, func)
         local success, res = httpGet(url)
         
         if not success then
-            error("Failed to download file: " .. path)
+            warn("Failed to download file: " .. path)
             return nil
         end
         
         if res == '404: Not Found' then
-            error("File not found: " .. path)
+            warn("File not found: " .. path)
             return nil
         end
         
@@ -84,6 +86,8 @@ local function downloadFile(path, func)
         
         if not writeSuccess then
             warn("Failed to write file: " .. path .. " - " .. tostring(writeErr))
+        else
+            print("Download Complete: " .. path)
         end
     end
     
@@ -129,7 +133,7 @@ local function finishLoading()
     if not shared.vapereload then
         if not vape.Categories then return end
         if vape.Categories.Main.Options['GUI bind indicator'].Enabled then
-            vape:CreateNotification('Finished Loading', vape.VapeButton and 'Press the button in the top right to open GUI' or 'Press '..table.concat(vape.Keybind, ' + '):upper()..' to open GUI', 5)
+            print('Finished Loading - ' .. (vape.VapeButton and 'Press the button in the top right to open GUI' or 'Press '..table.concat(vape.Keybind, ' + '):upper()..' to open GUI'))
         end
     end
 end
@@ -146,6 +150,7 @@ if not isfolder('newvape/assets/'..gui) then
 end
 
 -- Load GUI with proper error handling
+print("Loading GUI...")
 local success, result = pcall(function()
     return loadstring(downloadFile('newvape/guis/'..gui..'.lua'), 'gui')()
 end)
@@ -153,12 +158,13 @@ end)
 if not success then
     warn("Failed to load GUI: " .. tostring(result))
     -- Try to load a fallback GUI
+    print("Attempting to load fallback GUI...")
     success, result = pcall(function()
         return loadstring(downloadFile('newvape/guis/new.lua'), 'gui')()
     end)
     
     if not success then
-        error("Failed to load fallback GUI: " .. tostring(result))
+        warn("Failed to load fallback GUI: " .. tostring(result))
         return
     end
 end
@@ -167,6 +173,7 @@ vape = result
 -- shared.vape = vape
 
 -- Load XFunctions with error handling
+print("Loading XFunctions...")
 local XFunctions
 success, XFunctions = pcall(function()
     return loadstring(downloadFile('newvape/libraries/XFunctions.lua'), 'XFunctions')()
@@ -181,6 +188,7 @@ XFunctions:SetGlobalData('XFunctions', XFunctions)
 XFunctions:SetGlobalData('vape', vape)
 
 -- Load Performance module with error handling
+print("Loading Performance module...")
 local PerformanceModule
 success, PerformanceModule = pcall(function()
     return loadstring(downloadFile('newvape/libraries/performance.lua'), 'Performance')()
@@ -194,6 +202,7 @@ end
 XFunctions:SetGlobalData('Performance', PerformanceModule)
 
 -- Load utility functions with error handling
+print("Loading utility functions...")
 local utils_functions
 success, utils_functions = pcall(function()
     return loadstring(downloadFile('newvape/libraries/utils.lua'), 'Utils')()
@@ -208,23 +217,22 @@ for i: (any), v: (...any) -> (...any) in utils_functions do --> sideloads all re
     getfenv()[i] = v;
 end;
 
+-- Replace notification functions with console logging only
 getgenv().InfoNotification = function(title, msg, dur)
-    warn('info', tostring(title), tostring(msg), tostring(dur))
-    vape:CreateNotification(title, msg, dur)
+    print('INFO: ' .. tostring(title) .. ' - ' .. tostring(msg))
 end
 
 getgenv().warningNotification = function(title, msg, dur)
-    warn('warn', tostring(title), tostring(msg), tostring(dur))
-    vape:CreateNotification(title, msg, dur, 'warning')
+    warn('WARNING: ' .. tostring(title) .. ' - ' .. tostring(msg))
 end
 
 getgenv().errorNotification = function(title, msg, dur)
-    warn("error", tostring(title), tostring(msg), tostring(dur))
-    vape:CreateNotification(title, msg, dur, 'alert')
+    warn('ERROR: ' .. tostring(title) .. ' - ' .. tostring(msg))
 end
 
 if not shared.VapeIndependent then
     -- Load universal script with error handling
+    print("Loading universal script...")
     success = pcall(function()
         loadstring(downloadFile('newvape/games/universal.lua'), 'universal')()
     end)
@@ -234,6 +242,7 @@ if not shared.VapeIndependent then
     end
     
     -- Load modules script with error handling
+    print("Loading modules script...")
     success = pcall(function()
         loadstring(downloadFile('newvape/games/modules.lua'), 'modules')()
     end)
@@ -243,7 +252,9 @@ if not shared.VapeIndependent then
     end
     
     -- Load game-specific script if available
+    print("Checking for game-specific script...")
     if isfile('newvape/games/'..game.PlaceId..'.lua') then
+        print("Loading game-specific script from file...")
         success = pcall(function()
             loadstring(readfile('newvape/games/'..game.PlaceId..'.lua'), tostring(game.PlaceId))(...)
         end)
@@ -253,11 +264,13 @@ if not shared.VapeIndependent then
         end
     else
         if not shared.VapeDeveloper then
+            print("Attempting to download game-specific script...")
             local suc, res = pcall(function()
                 return game:HttpGet('https://raw.githubusercontent.com/wrealaero/NewAeroV4/'..readfile('newvape/profiles/commit.txt')..'/games/'..game.PlaceId..'.lua', true)
             end)
             
             if suc and res ~= '404: Not Found' then
+                print("Loading game-specific script from web...")
                 success = pcall(function()
                     writefile('newvape/games/'..game.PlaceId..'.lua', res)
                     loadstring(res, tostring(game.PlaceId))(...)
@@ -266,11 +279,14 @@ if not shared.VapeIndependent then
                 if not success then
                     warn("Failed to load game-specific script from web")
                 end
+            else
+                print("No game-specific script found for this game")
             end
         end
     end
     
     -- Finish loading
+    print("Finishing loading process...")
     finishLoading()
 else
     vape.Init = finishLoading
@@ -278,3 +294,4 @@ else
 end
 
 shared.VapeFullyLoaded = true
+print("Vape fully loaded!")
