@@ -2080,23 +2080,24 @@ run(function()
 		if Mouse.Enabled then
 			if not inputService:IsMouseButtonPressed(0) then return false end
 		end
-
+	
 		if GUI.Enabled then
 			if bedwars.AppController:isLayerOpen(bedwars.UILayers.MAIN) then return false end
 		end
-
+	
 		local sword = Limit.Enabled and store.hand or store.tools.sword
 		if not sword or not sword.tool then return false end
-
+	
 		local meta = bedwars.ItemMeta[sword.tool.Name]
 		if Limit.Enabled then
 			if store.hand.toolType ~= 'sword' or bedwars.DaoController.chargingMaid then return false end
 		end
-
+	
+		-- abstract forced me 
 		if LegitAura.Enabled then
 			if (tick() - bedwars.SwordController.lastSwing) > 0.2 then return false end
 		end
-
+	
 		return sword, meta
 	end
 
@@ -2524,22 +2525,29 @@ run(function()
 		Darker = true,
 		Visible = false
 	})
+	
 	Limit = Killaura:CreateToggle({
 		Name = 'Limit to items',
 		Function = function(callback)
-			if inputService.TouchEnabled and Killaura.Enabled then
+			if inputService.TouchEnabled and Killaura and Killaura.Enabled then
 				pcall(function()
-					lplr.PlayerGui.MobileUI['2'].Visible = callback
+					local uiButton = lplr:FindFirstChild("PlayerGui") and lplr.PlayerGui:FindFirstChild("MobileUI") and lplr.PlayerGui.MobileUI:FindFirstChild("2")
+					if uiButton then
+						uiButton.Visible = callback
+					end
 				end)
 			end
 		end,
 		Tooltip = 'Only attacks when the sword is held'
 	})
-	--[[LegitAura = Killaura:CreateToggle({
+	
+	LegitAura = Killaura:CreateToggle({
 		Name = 'Swing only',
 		Tooltip = 'Only attacks while swinging manually'
-	})]]
-end)
+	})
+	
+	end) -- ← This closes the run(function() ... block
+	
 	
 run(function()
 	local Value
@@ -8253,4 +8261,3 @@ run(function()
 		List = WinEffectName
 	})
 end)
-	
