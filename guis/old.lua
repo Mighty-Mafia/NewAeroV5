@@ -61,8 +61,8 @@ local uipallet = {
 local getcustomassets = {
 	['newvape/assets/old/barlogo.png'] = 'rbxasset://barlogo.png',
 	['newvape/assets/old/blatanticon.png'] = 'rbxasset://blatanticon.png',
-	['newvape/assets/old/combaticon.png'] = 'rbxasset://combaticon.png',
 	['newvape/assets/old/checkbox.png'] = 'rbxasset://checkbox.png',
+	['newvape/assets/old/combaticon.png'] = 'rbxasset://combaticon.png',
 	['newvape/assets/old/friendsicon.png'] = 'rbxasset://friendsicon.png',
 	['newvape/assets/old/guiicon.png'] = 'rbxasset://guiicon.png',
 	['newvape/assets/old/info.png'] = 'rbxasset://info.png',
@@ -73,8 +73,8 @@ local getcustomassets = {
 	['newvape/assets/old/settingsicon.png'] = 'rbxasset://settingsicon.png',
 	['newvape/assets/old/targetinfoicon.png'] = 'rbxasset://targetinfoicon.png',
 	['newvape/assets/old/textguiicon.png'] = 'rbxasset://textguiicon.png',
-	['newvape/assets/old/textvape.png'] = 'rbxasset://textvape.png',
 	['newvape/assets/old/textv4.png'] = 'rbxasset://textv4.png',
+	['newvape/assets/old/textvape.png'] = 'rbxasset://textvape.png',
 	['newvape/assets/old/utilityicon.png'] = 'rbxasset://utilityicon.png',
 	['newvape/assets/old/vape.png'] = 'rbxassetid://14373395239',
 	['newvape/assets/old/worldicon.png'] = 'rbxasset://worldicon.png'
@@ -3497,10 +3497,6 @@ mainapi:CreateCategory({
 	Name = 'Minigames',
 	Icon = getcustomasset('newvape/assets/old/worldicon.png')
 })
-mainapi:CreateCategory({
-	Name = 'Modules',
-	Icon = getcustomasset('newvape/assets/new/module.png')
-})
 mainapi.Legit = mainapi:CreateLegit({
 	Name = 'Legit'
 })
@@ -3799,8 +3795,7 @@ topbar:CreateButton({
 			MinigamesCategory = 8,
 			LegitCategory = 9,
 			FriendsCategory = 10,
-			ProfilesCategory = 11,
-			ModulesCategory = 12
+			ProfilesCategory = 11
 		}
 		local categories = {}
 		for _, v in mainapi.Categories do
