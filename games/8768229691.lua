@@ -305,8 +305,8 @@ run(function()
 	local roactCheck = replicatedStorage['rbxts_include']['node_modules']['@rbxts']:FindFirstChild('roact')
 	skywars = setmetatable({
 		CameraUtil = require(lplr.PlayerScripts.TS.util['camera-util']).CameraUtil,
-		FireOrigin = debug.getupvalue(ControllerTable.ProjectileController.chargeBow, 10).ORIGIN_OFFSET,
-		Gravity = debug.getupvalue(ControllerTable.ProjectileController.chargeBow, 12).WORLD_ACCELERATION.Y,
+		FireOrigin = debug.getupvalue(ControllerTable.ProjectileController.chargeBow, 11).ORIGIN_OFFSET,
+		Gravity = debug.getupvalue(ControllerTable.ProjectileController.chargeBow, 13).WORLD_ACCELERATION.Y,
 		ItemMeta = debug.getupvalue(ControllerTable.HotbarController.getSword, 1),
 		Remotes = debug.getupvalue(ControllerTable.MeleeController.strikeDesktop, 6),
 		Roact = require(roactCheck and roactCheck.src or replicatedStorage['rbxts_include']['node_modules']['@rbxts'].ReactLua['node_modules']['@jsdotlua']['roact-compat']),
@@ -863,52 +863,6 @@ run(function()
 		Min = 1,
 		Max = 10,
 		Default = 10
-	})
-	Killaura:CreateToggle({
-		Name = 'KillauraVisualizer',
-		Function = function(callback)
-			local VisualizerPart
-			local function createVisualizer(player)
-				local Visualizer = Instance.new("MeshPart")
-				Visualizer.MeshId = "rbxassetid://3726303797"
-				Visualizer.CanCollide = false
-				Visualizer.Anchored = true
-				Visualizer.Material = Enum.Material.Neon
-				Visualizer.Size = Vector3.new(10 * 1, 0.01, 10 * 1)
-				Visualizer.Color = Color3.fromHSV(Color.Hue, Color.Sat, Color.Value)
-				Visualizer.Parent = workspace
-	
-				local function updatePosition()
-					if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-						Visualizer.Position = player.Character.HumanoidRootPart.Position - Vector3.new(0, 2.9, 0)
-					end
-				end
-				game:GetService("RunService").Heartbeat:Connect(updatePosition)
-	
-				local function updateColor()
-					Visualizer.Color = Color3.fromHSV(Color.Hue, Color.Sat, Color.Value)
-				end
-				game:GetService("RunService").Heartbeat:Connect(updateColor)
-	
-				return Visualizer
-			end
-	
-			local player = game.Players.LocalPlayer
-			if callback and not VisualizerPart then
-				VisualizerPart = createVisualizer(player)
-			end
-	
-			local function cleanVisualizer()
-				if VisualizerPart then
-					VisualizerPart:Destroy()
-					VisualizerPart = nil
-				end
-			end
-	
-			if not callback then
-				cleanVisualizer()
-			end
-		end
 	})
 	Mouse = Killaura:CreateToggle({Name = 'Require mouse down'})
 	Swing = Killaura:CreateToggle({Name = 'No Swing'})
