@@ -696,7 +696,15 @@ run(function()
 			}
 		end,
 		HudAliveCount = require(lplr.PlayerScripts.TS.controllers.global['top-bar'].ui.game['hud-alive-player-counts']).HudAlivePlayerCounts,
-		ItemMeta = debug.getupvalue(require(replicatedStorage.TS.item['item-meta']).getItemMeta, 1),
+		ItemMeta = (function()
+			local itemMetaModule = require(replicatedStorage.TS.item['item-meta'])
+			return itemMetaModule.ItemMeta or (function()
+				local success, meta = pcall(function()
+					return debug.getupvalue(itemMetaModule.getItemMeta, 1)
+				end)
+				return success and meta or {}
+			end)()
+		end)(),
 		KillEffectMeta = require(replicatedStorage.TS.locker['kill-effect']['kill-effect-meta']).KillEffectMeta,
 		KillFeedController = Flamework.resolveDependency('client/controllers/game/kill-feed/kill-feed-controller@KillFeedController'),
 		Knit = Knit,
@@ -713,7 +721,15 @@ run(function()
 		SoundList = require(replicatedStorage.TS.sound['game-sound']).GameSound,
 		SoundManager = require(replicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).SoundManager,
 		Store = require(lplr.PlayerScripts.TS.ui.store).ClientStore,
-		TeamUpgradeMeta = debug.getupvalue(require(replicatedStorage.TS.games.bedwars['team-upgrade']['team-upgrade-meta']).getTeamUpgradeMeta, 1),
+		TeamUpgradeMeta = (function()
+			local teamUpgradeModule = require(replicatedStorage.TS.games.bedwars['team-upgrade']['team-upgrade-meta'])
+			return teamUpgradeModule.TeamUpgradeMeta or (function()
+				local success, meta = pcall(function()
+					return debug.getupvalue(teamUpgradeModule.getTeamUpgradeMeta, 1)
+				end)
+				return success and meta or {}
+			end)()
+		end)(),
 		UILayers = require(replicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).UILayers,
 		VisualizerUtils = require(lplr.PlayerScripts.TS.lib.visualizer['visualizer-utils']).VisualizerUtils,
 		WeldTable = require(replicatedStorage.TS.util['weld-util']).WeldUtil,
