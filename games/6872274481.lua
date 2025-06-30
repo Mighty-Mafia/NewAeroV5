@@ -25,6 +25,7 @@ local guiService = cloneref(game:GetService('GuiService'))
 local coreGui = cloneref(game:GetService('CoreGui'))
 local starterGui = cloneref(game:GetService('StarterGui'))
 
+
 local isnetworkowner = identifyexecutor and table.find({'AWP', 'Nihon'}, ({identifyexecutor()})[1]) and isnetworkowner or function()
 	return true
 end
@@ -2775,90 +2776,6 @@ run(function()
 end)
 	
 run(function()
-	local NoFall
-	local Mode
-	local rayParams = RaycastParams.new()
-	local groundHit
-	task.spawn(function()
-		groundHit = bedwars.Client:Get(remotes.GroundHit).instance
-	end)
-	
-	NoFall = vape.Categories.Blatant:CreateModule({
-		Name = 'NoFall',
-		Function = function(callback)
-			if callback then
-				local tracked = 0
-				if Mode.Value == 'Gravity' then
-					local extraGravity = 0
-					NoFall:Clean(runService.PreSimulation:Connect(function(dt)
-						if entitylib.isAlive then
-							local root = entitylib.character.RootPart
-							if root.AssemblyLinearVelocity.Y < -85 then
-								rayParams.FilterDescendantsInstances = {lplr.Character, gameCamera}
-								rayParams.CollisionGroup = root.CollisionGroup
-	
-								local rootSize = root.Size.Y / 2 + entitylib.character.HipHeight
-								local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, (tracked * 0.1) - rootSize, 0), rayParams)
-								if not ray then
-									root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -86, root.AssemblyLinearVelocity.Z)
-									root.CFrame += Vector3.new(0, extraGravity * dt, 0)
-									extraGravity += -workspace.Gravity * dt
-								end
-							else
-								extraGravity = 0
-							end
-						end
-					end))
-				else
-					repeat
-						if entitylib.isAlive then
-							local root = entitylib.character.RootPart
-							tracked = entitylib.character.Humanoid.FloorMaterial == Enum.Material.Air and math.min(tracked, root.AssemblyLinearVelocity.Y) or 0
-	
-							if tracked < -85 then
-								if Mode.Value == 'Packet' then
-									groundHit:FireServer(nil, Vector3.new(0, tracked, 0), workspace:GetServerTimeNow())
-								else
-									rayParams.FilterDescendantsInstances = {lplr.Character, gameCamera}
-									rayParams.CollisionGroup = root.CollisionGroup
-	
-									local rootSize = root.Size.Y / 2 + entitylib.character.HipHeight
-									if Mode.Value == 'Teleport' then
-										local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, -1000, 0), rayParams)
-										if ray then
-											root.CFrame -= Vector3.new(0, root.Position.Y - (ray.Position.Y + rootSize), 0)
-										end
-									else
-										local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, (tracked * 0.1) - rootSize, 0), rayParams)
-										if ray then
-											tracked = 0
-											root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -80, root.AssemblyLinearVelocity.Z)
-										end
-									end
-								end
-							end
-						end
-	
-						task.wait(0.03)
-					until not NoFall.Enabled
-				end
-			end
-		end,
-		Tooltip = 'Prevents taking fall damage.'
-	})
-	Mode = NoFall:CreateDropdown({
-		Name = 'Mode',
-		List = {'Packet', 'Gravity', 'Teleport', 'Bounce'},
-		Function = function()
-			if NoFall.Enabled then
-				NoFall:Toggle()
-				NoFall:Toggle()
-			end
-		end
-	})
-end)
-	
-run(function()
 	local old
 	
 	vape.Categories.Blatant:CreateModule({
@@ -4822,48 +4739,6 @@ run(function()
 end)
 	
 run(function()
-	local RavenTP
-	
-	RavenTP = vape.Categories.Utility:CreateModule({
-		Name = 'RavenTP',
-		Function = function(callback)
-			if callback then
-				RavenTP:Toggle()
-				local plr = entitylib.EntityMouse({
-					Range = 1000,
-					Players = true,
-					Part = 'RootPart'
-				})
-	
-				if getItem('raven') and plr then
-					bedwars.Client:Get(remotes.SpawnRaven):CallServerAsync():andThen(function(projectile)
-						if projectile then
-							local bodyforce = Instance.new('BodyForce')
-							bodyforce.Force = Vector3.new(0, projectile.PrimaryPart.AssemblyMass * workspace.Gravity, 0)
-							bodyforce.Parent = projectile.PrimaryPart
-	
-							if plr then
-								task.spawn(function()
-									for _ = 1, 20 do
-										if plr.RootPart and projectile then
-											projectile:SetPrimaryPartCFrame(CFrame.lookAlong(plr.RootPart.Position, gameCamera.CFrame.LookVector))
-										end
-										task.wait(0.05)
-									end
-								end)
-								task.wait(0.3)
-								bedwars.RavenController:detonateRaven()
-							end
-						end
-					end)
-				end
-			end
-		end,
-		Tooltip = 'Spawns and teleports a raven to a player\nnear your mouse.'
-	})
-end)
-	
-run(function()
 	local Scaffold
 	local Expand
 	local Tower
@@ -5066,6 +4941,227 @@ run(function()
 			end
 		end,
 		Tooltip = 'Lets you buy things like armor early.'
+	})
+end)
+
+
+run(function()
+    local BlockIn = {}
+	local HandCheck = {Enabled = false}
+	local AutoSwitch = {Enabled = false}
+    
+    local PatternArchitect = {}
+    PatternArchitect.__index = PatternArchitect
+    
+    function PatternArchitect.new()
+        local self = setmetatable({}, PatternArchitect)
+        self.fixedPattern = {
+            Vector3.new(3, 0, 0),
+            Vector3.new(0, 0, 3),
+            Vector3.new(-3, 0, 0),
+            Vector3.new(0, 0, -3),
+            Vector3.new(3, 3, 0),
+            Vector3.new(0, 3, 3),
+            Vector3.new(-3, 3, 0),
+            Vector3.new(0, 3, -3),
+            Vector3.new(0, 6, 0)
+        }
+        return self
+    end
+    
+    function PatternArchitect:GenerateAdaptiveBlueprint(origin)
+        local blueprint = {}
+        for i, offset in ipairs(self.fixedPattern) do
+            blueprint[i] = origin + offset
+        end
+        return blueprint
+    end
+    
+    local BlockStrategist = {}
+    BlockStrategist.__index = BlockStrategist
+    
+    function BlockStrategist.new()
+        local self = setmetatable({}, BlockStrategist)
+        self.cache = nil
+        return self
+    end
+    
+    function BlockStrategist:EvaluateInventory(inventory)
+        if self.cache then return self.cache end
+        
+        local blocks = {}
+        for _, item in pairs(inventory) do
+            local meta = bedwars.ItemMeta[item.itemType]
+            if meta.block then
+                blocks[#blocks + 1] = {itemType = item.itemType, score = meta.block.health or 0, tool = item.tool}
+            end
+        end
+        table.sort(blocks, function(a, b) return a.score < b.score end)
+        self.cache = blocks
+        return blocks
+    end
+    
+    function BlockStrategist:ResetCache()
+        self.cache = nil
+    end
+    
+    BlockIn = vape.Categories.Utility:CreateModule({
+        Name = 'BlockIn',
+        Function = function(callback)
+            if not callback then return end
+            
+            if not entitylib.isAlive or not entitylib.character or not entitylib.character.RootPart then
+                errorNotification('BlockIn', 'Unable to initialize BlockIn: Player data missing', 5)
+                BlockIn:Toggle()
+                return
+            end
+
+			if HandCheck.Enabled and not AutoSwitch.Enabled then
+				if not (store.hand and store.hand.toolType == "block") then
+					errorNotification("BlockIn | Hand Check", "You aren't holding a block!", 1.5)
+					BlockIn:Toggle()
+					return
+				end
+			end
+            
+            local architect = PatternArchitect.new()
+            local strategist = BlockStrategist.new()
+            
+            local origin = entitylib.character.RootPart.Position
+            local blocks = strategist:EvaluateInventory(store.inventory.inventory.items)
+            
+            if #blocks == 0 then
+				errorNotification('BlockIn', 'No suitable blocks available for BlockIn', 5)
+                BlockIn:Toggle()
+                return
+            end
+            
+            local blueprint = architect:GenerateAdaptiveBlueprint(origin)
+            
+            task.spawn(function()
+                local blockIndex = 1
+                local blockCount = #blocks
+                
+                for i, pos in ipairs(blueprint) do
+                    if not BlockIn.Enabled then break end
+                    local blockAtPos = bedwars.BlockController:getStore():getBlockAt(bedwars.BlockController:getBlockPosition(pos))
+                    if not blockAtPos then
+                        local block = blocks[blockIndex]
+						if AutoSwitch.Enabled then 
+							switchItem(block.tool)
+						end
+                        local success = pcall(function()
+                            bedwars.placeBlock(pos, block.itemType, false)
+                        end)
+                        if not success then
+							errorNotification('BlockIn', 'Failed to place block at position', 3)
+                        end
+                        blockIndex = (blockIndex % blockCount) + 1
+                        task.wait(0.05) 
+                    end
+                end
+                
+                strategist:ResetCache()
+                if BlockIn.Enabled then
+                    BlockIn:Toggle()
+                end
+            end)
+        end,
+        Tooltip = 'Shields you from attacks for when you are attacking a bed'
+    })
+
+	HandCheck = BlockIn:CreateToggle({
+		Name = "Hand Check",
+		Function = function() end,
+		Default = false
+	})
+
+	AutoSwitch = BlockIn:CreateToggle({
+		Name = "Auto Switch", 
+		Function = function() end, 
+		Default = true
+	})
+end)
+
+run(function()
+    local anim
+	local asset
+	local lastPosition
+    local NightmareEmote
+	NightmareEmote = vape.Categories.World:CreateModule({
+		Name = "NightmareEmote",
+		Function = function(call)
+			if call then
+				local l__GameQueryUtil__8
+				if (not shared.CheatEngineMode) then 
+					l__GameQueryUtil__8 = require(game:GetService("ReplicatedStorage")['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil 
+				else
+					local backup = {}; function backup:setQueryIgnored() end; l__GameQueryUtil__8 = backup;
+				end
+				local l__TweenService__9 = game:GetService("TweenService")
+				local player = game:GetService("Players").LocalPlayer
+				local p6 = player.Character
+				
+				if not p6 then NightmareEmote:Toggle() return end
+				
+				local v10 = game:GetService("ReplicatedStorage"):WaitForChild("Assets"):WaitForChild("Effects"):WaitForChild("NightmareEmote"):Clone();
+				asset = v10
+				v10.Parent = game.Workspace
+				lastPosition = p6.PrimaryPart and p6.PrimaryPart.Position or Vector3.new()
+				
+				task.spawn(function()
+					while asset ~= nil do
+						local currentPosition = p6.PrimaryPart and p6.PrimaryPart.Position
+						if currentPosition and (currentPosition - lastPosition).Magnitude > 0.1 then
+							asset:Destroy()
+							asset = nil
+							NightmareEmote:Toggle()
+							break
+						end
+						lastPosition = currentPosition
+						v10:SetPrimaryPartCFrame(p6.LowerTorso.CFrame + Vector3.new(0, -2, 0));
+						task.wait()
+					end
+				end)
+				
+				local v11 = v10:GetDescendants();
+				local function v12(p8)
+					if p8:IsA("BasePart") then
+						l__GameQueryUtil__8:setQueryIgnored(p8, true);
+						p8.CanCollide = false;
+						p8.Anchored = true;
+					end;
+				end;
+				for v13, v14 in ipairs(v11) do
+					v12(v14, v13 - 1, v11);
+				end;
+				local l__Outer__15 = v10:FindFirstChild("Outer");
+				if l__Outer__15 then
+					l__TweenService__9:Create(l__Outer__15, TweenInfo.new(1.5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), {
+						Orientation = l__Outer__15.Orientation + Vector3.new(0, 360, 0)
+					}):Play();
+				end;
+				local l__Middle__16 = v10:FindFirstChild("Middle");
+				if l__Middle__16 then
+					l__TweenService__9:Create(l__Middle__16, TweenInfo.new(12.5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), {
+						Orientation = l__Middle__16.Orientation + Vector3.new(0, -360, 0)
+					}):Play();
+				end;
+                anim = Instance.new("Animation")
+				anim.AnimationId = "rbxassetid://9191822700"
+				anim = p6.Humanoid:LoadAnimation(anim)
+				anim:Play()
+			else 
+                if anim then 
+					anim:Stop()
+					anim = nil
+				end
+				if asset then
+					asset:Destroy() 
+					asset = nil
+				end
+			end
+		end
 	})
 end)
 	
