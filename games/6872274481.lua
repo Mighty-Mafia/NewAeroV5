@@ -4219,7 +4219,7 @@ run(function()
 				bedwars.Client:Get(remotes.PickupMetal):SendToServer({
 					id = v:GetAttribute('Id')
 				})
-			end, 20, false)
+			end, 50, false)
 		end,
 		miner = function()
 			kitCollection('petrified-player', function(v)
@@ -5085,92 +5085,185 @@ end)
 
 run(function()
     local anim
-	local asset
-	local lastPosition
+    local asset
+    local lastPosition
     local NightmareEmote
-	NightmareEmote = vape.Categories.World:CreateModule({
-		Name = "NightmareEmote",
-		Function = function(call)
-			if call then
-				local l__GameQueryUtil__8
-				if (not shared.CheatEngineMode) then 
-					l__GameQueryUtil__8 = require(game:GetService("ReplicatedStorage")['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil 
-				else
-					local backup = {}; function backup:setQueryIgnored() end; l__GameQueryUtil__8 = backup;
-				end
-				local l__TweenService__9 = game:GetService("TweenService")
-				local player = game:GetService("Players").LocalPlayer
-				local p6 = player.Character
-				
-				if not p6 then NightmareEmote:Toggle() return end
-				
-				local v10 = game:GetService("ReplicatedStorage"):WaitForChild("Assets"):WaitForChild("Effects"):WaitForChild("NightmareEmote"):Clone();
-				asset = v10
-				v10.Parent = game.Workspace
-				lastPosition = p6.PrimaryPart and p6.PrimaryPart.Position or Vector3.new()
-				
-				task.spawn(function()
-					while asset ~= nil do
-						local currentPosition = p6.PrimaryPart and p6.PrimaryPart.Position
-						if currentPosition and (currentPosition - lastPosition).Magnitude > 0.1 then
-							asset:Destroy()
-							asset = nil
-							NightmareEmote:Toggle()
-							break
-						end
-						lastPosition = currentPosition
-						v10:SetPrimaryPartCFrame(p6.LowerTorso.CFrame + Vector3.new(0, -2, 0));
-						task.wait()
-					end
-				end)
-				
-				local v11 = v10:GetDescendants();
-				local function v12(p8)
-					if p8:IsA("BasePart") then
-						l__GameQueryUtil__8:setQueryIgnored(p8, true);
-						p8.CanCollide = false;
-						p8.Anchored = true;
-					end;
-				end;
-				for v13, v14 in ipairs(v11) do
-					v12(v14, v13 - 1, v11);
-				end;
-				local l__Outer__15 = v10:FindFirstChild("Outer");
-				if l__Outer__15 then
-					l__TweenService__9:Create(l__Outer__15, TweenInfo.new(1.5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), {
-						Orientation = l__Outer__15.Orientation + Vector3.new(0, 360, 0)
-					}):Play();
-				end;
-				local l__Middle__16 = v10:FindFirstChild("Middle");
-				if l__Middle__16 then
-					l__TweenService__9:Create(l__Middle__16, TweenInfo.new(12.5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), {
-						Orientation = l__Middle__16.Orientation + Vector3.new(0, -360, 0)
-					}):Play();
-				end;
+
+    NightmareEmote = vape.Categories.World:CreateModule({
+        Name = "NightmareEmote",
+        Function = function(call)
+            if call then
+                local l__GameQueryUtil__8
+                if (not shared.CheatEngineMode) then 
+                    l__GameQueryUtil__8 = require(game:GetService("ReplicatedStorage")['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil 
+                else
+                    local backup = {}; function backup:setQueryIgnored() end; l__GameQueryUtil__8 = backup;
+                end
+
+                local l__TweenService__9 = game:GetService("TweenService")
+                local player = game:GetService("Players").LocalPlayer
+                local p6 = player.Character
+                
+                if not p6 then NightmareEmote:Toggle() return end
+                
+                local v10 = game:GetService("ReplicatedStorage"):WaitForChild("Assets"):WaitForChild("Effects"):WaitForChild("NightmareEmote"):Clone()
+                asset = v10
+                v10.Parent = game.Workspace
+                lastPosition = p6.PrimaryPart and p6.PrimaryPart.Position or Vector3.new()
+
+                task.spawn(function()
+                    while asset ~= nil do
+                        local currentPosition = p6.PrimaryPart and p6.PrimaryPart.Position
+                        if currentPosition and (currentPosition - lastPosition).Magnitude > 0.1 then
+                            asset:Destroy()
+                            asset = nil
+                            NightmareEmote:Toggle()
+                            break
+                        end
+                        lastPosition = currentPosition
+                        v10:SetPrimaryPartCFrame(p6.LowerTorso.CFrame + Vector3.new(0, -2, 0))
+                        task.wait()
+                    end
+                end)
+
+                local v11 = v10:GetDescendants()
+                local function v12(p8)
+                    if p8:IsA("BasePart") then
+                        l__GameQueryUtil__8:setQueryIgnored(p8, true)
+                        p8.CanCollide = false
+                        p8.Anchored = true
+                    end
+                end
+
+                for _, v14 in ipairs(v11) do
+                    v12(v14)
+                end
+
+                local l__Outer__15 = v10:FindFirstChild("Outer")
+                if l__Outer__15 then
+                    l__TweenService__9:Create(l__Outer__15, TweenInfo.new(1.5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), {
+                        Orientation = l__Outer__15.Orientation + Vector3.new(0, 360, 0)
+                    }):Play()
+                end
+
+                local l__Middle__16 = v10:FindFirstChild("Middle")
+                if l__Middle__16 then
+                    l__TweenService__9:Create(l__Middle__16, TweenInfo.new(12.5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), {
+                        Orientation = l__Middle__16.Orientation + Vector3.new(0, -360, 0)
+                    }):Play()
+                end
+
                 anim = Instance.new("Animation")
-				anim.AnimationId = "rbxassetid://9191822700"
-				anim = p6.Humanoid:LoadAnimation(anim)
-				anim:Play()
-			else 
+                anim.AnimationId = "rbxassetid://9191822700"
+                anim = p6.Humanoid:LoadAnimation(anim)
+                anim:Play()
+            else 
                 if anim then 
-					anim:Stop()
-					anim = nil
-				end
-				if asset then
-					asset:Destroy() 
-					asset = nil
-				end
-			end
-		end
-	})
+                    anim:Stop()
+                    anim = nil
+                end
+                if asset then
+                    asset:Destroy()
+                    asset = nil
+                end
+            end
+        end
+    })
 end)
-	
+
+run(function()
+    local AntiLag
+    local ToggleState = false
+
+    local function applyAntiLag()
+        local Terrain = workspace:FindFirstChildOfClass('Terrain')
+        if Terrain then
+            Terrain.WaterWaveSize = 0
+            Terrain.WaterWaveSpeed = 0
+            Terrain.WaterReflectance = 0
+            Terrain.WaterTransparency = 1
+        end
+
+        local Lighting = game:GetService('Lighting')
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        Lighting.FogStart = 9e9
+
+        settings().Rendering.QualityLevel = 1
+
+        for _, v in pairs(game:GetDescendants()) do
+            if v:IsA("BasePart") then
+                v.Material = Enum.Material.Plastic
+                v.Reflectance = 0
+                v.BackSurface = Enum.SurfaceType.SmoothNoOutlines
+                v.BottomSurface = Enum.SurfaceType.SmoothNoOutlines
+                v.FrontSurface = Enum.SurfaceType.SmoothNoOutlines
+                v.LeftSurface = Enum.SurfaceType.SmoothNoOutlines
+                v.RightSurface = Enum.SurfaceType.SmoothNoOutlines
+                v.TopSurface = Enum.SurfaceType.SmoothNoOutlines
+            elseif v:IsA("Decal") then
+                v.Transparency = 1
+            elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
+                v.Lifetime = NumberRange.new(0)
+            end
+        end
+
+        for _, v in pairs(Lighting:GetDescendants()) do
+            if v:IsA("PostEffect") then
+                v.Enabled = false
+            end
+        end
+
+        AntiLag:Clean(workspace.DescendantAdded:Connect(function(child)
+            task.spawn(function()
+                if child:IsA('ForceField') or child:IsA('Sparkles') or child:IsA('Smoke') or child:IsA('Fire') or child:IsA('Beam') then
+                    game:GetService('RunService').Heartbeat:Wait()
+                    child:Destroy()
+                end
+            end)
+        end))
+    end
+
+    local function revertAntiLag()
+        AntiLag:Clean()
+
+        local Terrain = workspace:FindFirstChildOfClass('Terrain')
+        if Terrain then
+            Terrain.WaterWaveSize = 0.1
+            Terrain.WaterWaveSpeed = 0.1
+            Terrain.WaterReflectance = 0.5
+            Terrain.WaterTransparency = 0.5
+        end
+
+        local Lighting = game:GetService('Lighting')
+        Lighting.GlobalShadows = true
+        Lighting.FogEnd = 100000
+        Lighting.FogStart = 0
+
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level10
+    end
+
+    AntiLag = vape.Categories.World:CreateModule({
+        Name = 'Anti-Lag',
+        Function = function(callback)
+            ToggleState = callback
+            if ToggleState then
+                applyAntiLag()
+                notif('Anti-Lag', 'Anti-Lag enabled!', 3)
+            else
+                revertAntiLag()
+                notif('Anti-Lag', 'Anti-Lag disabled!', 3)
+            end
+        end,
+        Tooltip = 'Reduces lag by lowering graphics and removing certain effects.'
+    })
+end)
+
 run(function()
 	local StaffDetector
 	local Mode
 	local Clans
 	local Party
-	local Profile
 	local Users
 	local blacklistedclans = {'gg', 'gg2', 'DV', 'DV2'}
 	local blacklisteduserids = {1502104539, 3826146717, 4531785383, 1049767300, 4926350670, 653085195, 184655415, 2752307430, 5087196317, 5744061325, 1536265275}
