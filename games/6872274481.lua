@@ -1,4 +1,5 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
+--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -11,6 +12,14 @@ local vapeEvents = setmetatable({}, {
 		return self[index]
 	end
 })
+
+local function errorNotification(title, message, duration)
+    if shared.vape then
+        shared.vape:CreateNotification(title, message, duration, 'alert')
+    else
+        warn("Notification: [" .. title .. "] " .. message)
+    end
+end
 
 local playersService = cloneref(game:GetService('Players'))
 local replicatedStorage = cloneref(game:GetService('ReplicatedStorage'))
@@ -1284,48 +1293,31 @@ run(function()
 	})
 	StrafeIncrease = AimAssist:CreateToggle({Name = 'Strafe increase'})
 end)
-	
+
 run(function()
-	local old
-	
+	local old 
+
 	AutoCharge = vape.Categories.Combat:CreateModule({
 	    Name = 'AutoCharge',
 	    Function = function(callback)
-	        debug.setconstant(bedwars.SwordController.attackEntity, 58, callback and 'damage' or 'multiHitCheckDurationSec')
 	        if callback then
-	            local chargeSwingTime = 0
-	            local canSwing
-	
+	            local chargeSwingTime = 0 
+
 	            old = bedwars.SwordController.sendServerRequest
 	            bedwars.SwordController.sendServerRequest = function(self, ...)
-	                if (os.clock() - chargeSwingTime) < AutoChargeTime.Value then return end
-	                self.lastSwingServerTimeDelta = 0.5
-	                chargeSwingTime = os.clock()
-	                canSwing = true
-	
-	                local item = self:getHandItem()
-	                if item and item.tool then
-	                    self:playSwordEffect(bedwars.ItemMeta[item.tool.Name], false)
+	                if (os.clock() - chargeSwingTime) < AutoChargeTime.Value then
+	                    return 
 	                end
-	
+
+	                self.lastSwingServerTimeDelta = 0.5 
+	                chargeSwingTime = os.clock() 
+
 	                return old(self, ...)
-	            end
-	
-	            oldSwing = bedwars.SwordController.playSwordEffect
-	            bedwars.SwordController.playSwordEffect = function(...)
-	                if not canSwing then return end
-	                canSwing = false
-	                return oldSwing(...)
 	            end
 	        else
 	            if old then
 	                bedwars.SwordController.sendServerRequest = old
 	                old = nil
-	            end
-	
-	            if oldSwing then
-	                bedwars.SwordController.playSwordEffect = oldSwing
-	                oldSwing = nil
 	            end
 	        end
 	    end,
