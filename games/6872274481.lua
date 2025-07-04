@@ -1305,12 +1305,13 @@ run(function()
 
 	            old = bedwars.SwordController.sendServerRequest
 	            bedwars.SwordController.sendServerRequest = function(self, ...)
-	                if (os.clock() - chargeSwingTime) < AutoChargeTime.Value then
+	              
+	                if (os.clock() - chargeSwingTime) < 0.5 then 
 	                    return 
 	                end
 
 	                self.lastSwingServerTimeDelta = 0.5 
-	                chargeSwingTime = os.clock() 
+	                chargeSwingTime = os.clock()
 
 	                return old(self, ...)
 	            end
@@ -1322,13 +1323,6 @@ run(function()
 	        end
 	    end,
 	    Tooltip = 'Allows you to get charged hits while spam clicking.'
-	})
-	AutoChargeTime = AutoCharge:CreateSlider({
-	    Name = 'Charge Time',
-	    Min = 0,
-	    Max = 0.5,
-	    Default = 0.4,
-	    Decimal = 100
 	})
 end)
 	
