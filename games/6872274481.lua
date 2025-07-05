@@ -1,5 +1,4 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -4113,6 +4112,46 @@ run(function()
 				})
 			end, 18, true)
 		end,
+		drill = function()
+			repeat
+				if not AutoKit.Enabled then
+					break
+				end
+		
+				local foundDrill = false
+				for _, child in workspace:GetDescendants() do
+					if child:IsA("Model") and child.Name == "Drill" then
+						local drillPrimaryPart = child.PrimaryPart
+						if drillPrimaryPart then
+							foundDrill = true
+							local args = {
+								{
+									drill = child
+								}
+							}
+							local success, err = pcall(function()
+								game:GetService("ReplicatedStorage"):WaitForChild("rbxts_include"):WaitForChild("node_modules"):WaitForChild("@rbxts"):WaitForChild("net"):WaitForChild("out"):WaitForChild("_NetManaged"):WaitForChild("ExtractFromDrill"):FireServer(unpack(args))
+							end)
+		
+							task.wait(0.05)
+						end
+					elseif child:IsA("BasePart") and child.Name == "Drill" then
+						foundDrill = true
+						local args = {
+							{
+								drill = child
+							}
+						}
+						local success, err = pcall(function()
+							game:GetService("ReplicatedStorage"):WaitForChild("rbxts_include"):WaitForChild("node_modules"):WaitForChild("@rbxts"):WaitForChild("net"):WaitForChild("out"):WaitForChild("_NetManaged"):WaitForChild("ExtractFromDrill"):FireServer(unpack(args))
+						end)
+		
+						task.wait(0.05)
+					end
+				end
+				task.wait(0.5)
+			until not AutoKit.Enabled
+		end,
 		farmer_cletus = function()
 			kitCollection('HarvestableCrop', function(v)
 				if bedwars.Client:Get(remotes.HarvestCrop):CallServer({position = bedwars.BlockController:getBlockPosition(v.Position)}) then
@@ -7259,6 +7298,7 @@ run(function()
 		Tooltip = 'Drops items fast when you hold Q'
 	})
 end)
+
 	
 run(function()
 	local BedPlates
