@@ -1,6 +1,3 @@
--- still in beta lmao (like 200 update)
--- update don july 5th 2025
-
 local runService = game:GetService("RunService")
 local players = game:GetService("Players")
 local httpService = game:GetService("HttpService")
@@ -9,25 +6,27 @@ local lighting = game:GetService("Lighting")
 local localPlayer = players.LocalPlayer
 local guiService = game:GetService("GuiService")
 local starterGui = game:GetService("StarterGui")
+local userInputService = game:GetService("UserInputService")
+local contentProvider = game:GetService("ContentProvider")
 
 local CONFIG = {
-    CRITICAL_MEMORY_THRESHOLD_MB = 450,
-    AGGRESSIVE_GC_THRESHOLD_MB = 550,
-    MEMORY_MONITOR_INTERVAL = 5,
-
-    FREEZE_THRESHOLD_SECONDS = 4,
+    CRITICAL_MEMORY_THRESHOLD_MB = 400,
+    AGGRESSIVE_GC_THRESHOLD_MB = 500,
+    MEMORY_MONITOR_INTERVAL = 3,
+    FREEZE_THRESHOLD_SECONDS = 3,
     FREEZE_COUNT_TRIGGER = 2,
-    FREEZE_RECOVERY_INTERVAL = 30,
-
-    FPS_CHECK_INTERVAL = 2,
-    LOW_FPS_THRESHOLD = 20,
-    DRASTIC_FPS_THRESHOLD = 10,
-    FPS_DROP_COUNT_TRIGGER = 3,
-
-    RECONNECT_DELAY_SECONDS = 5,
-    DISCONNECT_MONITOR_INTERVAL = 10,
-
-    INITIAL_QUALITY_CAP = 7,
+    FREEZE_RECOVERY_INTERVAL = 20,
+    FPS_CHECK_INTERVAL = 1.5,
+    LOW_FPS_THRESHOLD = 25,
+    DRASTIC_FPS_THRESHOLD = 15,
+    FPS_DROP_COUNT_TRIGGER = 2,
+    PING_CHECK_INTERVAL = 5,
+    HIGH_PING_THRESHOLD_MS = 300,
+    CRITICAL_PING_THRESHOLD_MS = 500,
+    PING_SPIKE_COUNT_TRIGGER = 3,
+    RECONNECT_DELAY_SECONDS = 3,
+    DISCONNECT_MONITOR_INTERVAL = 8,
+    INITIAL_QUALITY_CAP = 6,
     EMERGENCY_QUALITY_LEVEL = 1,
     DISABLE_PARTICLES_ON_EMERGENCY = true,
     DISABLE_SOUNDS_ON_EMERGENCY = true,
@@ -35,9 +34,14 @@ local CONFIG = {
     DISABLE_WATER_REFLECTIONS = true,
     DISABLE_FOG = true,
     DISABLE_BLUR_EFFECTS = true,
-
-    LOG_FILE_NAME = "CrashLog.txt",
-    NOTIFICATION_DURATION = 5,
+    DISABLE_BLOOM_EFFECTS = true,
+    DISABLE_COLOR_CORRECTION = true,
+    DISABLE_POST_PROCESS_EFFECTS = true,
+    DISABLE_DECORATIONS = true,
+    DISABLE_PHYSICS_THROTTLING = false,
+    REDUCE_RENDER_DISTANCE = true,
+    LOG_FILE_NAME = "CrashLog_Optimized.txt",
+    NOTIFICATION_DURATION = 4,
 }
 
 local lastHeartbeat = tick()
@@ -48,7 +52,8 @@ local freezeCount = 0
 local emergencyMode = false
 local lastRespawn = 0
 local lastPlayerCheckTime = tick()
-
+local pingSpikeCount = 0
+local initialQualityLevel = settings().Rendering.QualityLevel
 
 local function log(txt)
     local logMsg = os.date("[%X] ") .. txt
@@ -75,34 +80,63 @@ end
 local function safeCollectGarbage(aggressive)
     local mem = collectgarbage("count") / 1024
     if mem > CONFIG.CRITICAL_MEMORY_THRESHOLD_MB or aggressive then
-        log(string.format("Memory at %.2fMB. Cleaning up.", mem))
-        task.wait(0.05)
-        collectgarbage("collect")
-        task.wait(0.05)
-
-        if aggressive then
-            for i = 1, 2 do
-                collectgarbage("collect")
-                task.wait(0.05)
-            end
-
-            pcall(function()
-                for _, obj in pairs(workspace:GetDescendants()) do
-                    if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") then
+        log(string.format("Memory at %.2fMB. Initiating cleanup%s.", mem, aggressive and " (aggressive)" or ""))
+        task.wait(0.02)
+        for i = 1, (aggressive and 3 or 1) do
+            collectgarbage("collect")
+            task.wait(0.02)
+        end
+        pcall(function()
+            for _, obj in pairs(workspace:GetDescendants()) do
+                if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") then
+                    if CONFIG.DISABLE_PARTICLES_ON_EMERGENCY and (emergencyMode or aggressive) then
                         obj.Enabled = false
-                    elseif obj:IsA("Sound") and obj.Playing then
-                        if emergencyMode and CONFIG.DISABLE_SOUNDS_ON_EMERGENCY then
-                            obj.Playing = false
-                        end
+                    end
+                elseif obj:IsA("Sound") and obj.Playing then
+                    if CONFIG.DISABLE_SOUNDS_ON_EMERGENCY and (emergencyMode or aggressive) then
+                        obj.Playing = false
+                    end
+                elseif obj:IsA("MeshPart") or obj:IsA("Part") then
+                    if CONFIG.DISABLE_DECORATIONS and (emergencyMode or aggressive) and obj.Size.X * obj.Size.Y * obj.Size.Z < 10 then
+                        obj.Transparency = 1
+                        obj.CanCollide = false
                     end
                 end
-                if CONFIG.DISABLE_SHADOWS_ON_EMERGENCY then
-                    lighting.GlobalShadows = false
+            end
+            if CONFIG.DISABLE_SHADOWS_ON_EMERGENCY and (emergencyMode or aggressive) then
+                lighting.GlobalShadows = false
+                log("Global Shadows disabled.")
+            end
+            if CONFIG.DISABLE_WATER_REFLECTIONS and (emergencyMode or aggressive) then
+                lighting.LegacyDynamicHeadsAndFaces = false
+                lighting.WaterReflectance = 0
+                log("Water reflections disabled.")
+            end
+            if CONFIG.DISABLE_FOG and (emergencyMode or aggressive) then
+                lighting.FogEnd = math.huge
+                lighting.FogStart = math.huge
+                log("Fog disabled.")
+            end
+            if CONFIG.DISABLE_BLOOM_EFFECTS and (emergencyMode or aggressive) then
+                local bloom = lighting:FindFirstChildOfClass("BloomEffect")
+                if bloom then bloom.Enabled = false end
+                log("Bloom effect disabled.")
+            end
+            if CONFIG.DISABLE_COLOR_CORRECTION and (emergencyMode or aggressive) then
+                local cc = lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+                if cc then cc.Enabled = false end
+                log("ColorCorrection effect disabled.")
+            end
+            if CONFIG.DISABLE_POST_PROCESS_EFFECTS and (emergencyMode or aggressive) then
+                for _, effect in pairs(lighting:GetChildren()) do
+                    if effect:IsA("PostEffect") then
+                        effect.Enabled = false
+                    end
                 end
-            end)
-        end
-
-        task.wait(0.2)
+                log("Generic Post-Process effects disabled.")
+            end
+        end)
+        task.wait(0.1)
         log(string.format("Memory cleaned. Now at: %.2fMB", collectgarbage("count") / 1024))
     end
 end
@@ -112,18 +146,14 @@ local function enterEmergencyMode()
     emergencyMode = true
     log("!!! EMERGENCY MODE ACTIVATED - Taking extreme measures to prevent crash !!!")
     sendNotification("Crash Prevention", "Emergency mode activated to prevent crash!", CONFIG.NOTIFICATION_DURATION, "alert")
-
     safeCollectGarbage(true)
-
     pcall(function()
         settings().Rendering.QualityLevel = CONFIG.EMERGENCY_QUALITY_LEVEL
         log("Rendering quality set to level " .. CONFIG.EMERGENCY_QUALITY_LEVEL)
-
         if CONFIG.DISABLE_SHADOWS_ON_EMERGENCY then
             lighting.GlobalShadows = false
             log("Global Shadows disabled.")
         end
-
         if CONFIG.DISABLE_WATER_REFLECTIONS then
             lighting.LegacyDynamicHeadsAndFaces = false
             lighting.WaterReflectance = 0
@@ -134,13 +164,34 @@ local function enterEmergencyMode()
             lighting.FogStart = math.huge
             log("Fog disabled.")
         end
+        if CONFIG.DISABLE_BLUR_EFFECTS then
+            for _, gui in pairs({game:GetService("CoreGui"), players.LocalPlayer:FindFirstChild("PlayerGui")}) do
+                if gui then
+                    for _, effect in pairs(gui:GetDescendants()) do
+                        if effect:IsA("BlurEffect") or effect:IsA("DepthOfFieldEffect") then
+                            effect.Enabled = false
+                            log("Proactively disabled blur/DOF effect in GUI: " .. effect.Name)
+                        end
+                    end
+                end
+            end
+        end
+        if CONFIG.DISABLE_BLOOM_EFFECTS then
+            local bloom = lighting:FindFirstChildOfClass("BloomEffect")
+            if bloom then bloom.Enabled = false end
+            log("Bloom effect disabled.")
+        end
+        if CONFIG.DISABLE_COLOR_CORRECTION then
+            local cc = lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+            if cc then cc.Enabled = false end
+            log("ColorCorrection effect disabled.")
+        end
     end)
 end
 
 local function monitorMemory()
     while task.wait(CONFIG.MEMORY_MONITOR_INTERVAL) do
         safeCollectGarbage(emergencyMode)
-
         local mem = collectgarbage("count") / 1024
         if mem > CONFIG.CRITICAL_MEMORY_THRESHOLD_MB then
             memOverloadCount = memOverloadCount + 1
@@ -158,21 +209,17 @@ end
 local function monitorFPS()
     local frameCount = 0
     local lastCheck = tick()
-
     runService.RenderStepped:Connect(function()
         frameCount = frameCount + 1
         local now = tick()
-
         if now - lastCheck >= CONFIG.FPS_CHECK_INTERVAL then
             local fps = frameCount / (now - lastCheck)
             frameCount = 0
             lastCheck = now
-
             if fps < CONFIG.LOW_FPS_THRESHOLD then
                 fpsDropCount = fpsDropCount + 1
                 if fpsDropCount >= CONFIG.FPS_DROP_COUNT_TRIGGER then
                     log(string.format("FPS is tanking: %.0f FPS. Taking action.", fps))
-
                     if fps < CONFIG.DRASTIC_FPS_THRESHOLD then
                         pcall(function()
                             local currentQuality = settings().Rendering.QualityLevel
@@ -199,9 +246,7 @@ local function monitorFreeze()
         if tick() - lastHeartbeat > CONFIG.FREEZE_THRESHOLD_SECONDS then
             freezeCount = freezeCount + 1
             log("Game detected a freeze: " .. (tick() - lastHeartbeat) .. " seconds elapsed. Freeze count: " .. freezeCount)
-
             safeCollectGarbage(true)
-
             if freezeCount >= CONFIG.FREEZE_COUNT_TRIGGER then
                 log("Multiple freezes detected - Taking emergency action")
                 enterEmergencyMode()
@@ -214,6 +259,27 @@ local function monitorFreeze()
                 lastPlayerCheckTime = tick()
             end
         end
+    end
+end
+
+local function monitorNetwork()
+    while task.wait(CONFIG.PING_CHECK_INTERVAL) do
+        pcall(function()
+            local ping = players.LocalPlayer:GetNetworkPing() * 1000
+            log(string.format("Current Ping: %.0fms", ping))
+            if ping > CONFIG.HIGH_PING_THRESHOLD_MS then
+                pingSpikeCount = pingSpikeCount + 1
+                log(string.format("High ping detected: %.0fms. Spike count: %d", ping, pingSpikeCount))
+                if pingSpikeCount >= CONFIG.PING_SPIKE_COUNT_TRIGGER then
+                    log("Persistent high ping detected. Activating emergency network measures.")
+                    sendNotification("Network Issue", "High ping detected! Optimizing network performance.", CONFIG.NOTIFICATION_DURATION, "warning")
+                    enterEmergencyMode()
+                    pingSpikeCount = 0
+                end
+            else
+                pingSpikeCount = 0
+            end
+        end)
     end
 end
 
@@ -231,12 +297,10 @@ local function monitorPlayer()
                 return
             end
         end
-
         if currentLocalPlayer and not currentLocalPlayer.Character and (tick() - lastRespawn) > CONFIG.DISCONNECT_MONITOR_INTERVAL then
-            log("Character missing when it should exist (not recently respawned). Possible issue.")
+            log("Character missing when it should exist (not recently respawned). Possible issue, performing GC.")
             safeCollectGarbage(true)
         end
-
         if currentLocalPlayer and currentLocalPlayer.Character then
             lastRespawn = tick()
         end
@@ -246,9 +310,9 @@ end
 local function autoReconnect()
     pcall(function()
         guiService.DescendantAdded:Connect(function(descendant)
-            if descendant:IsA("Frame") and descendant.Name == "ErrorPrompt" then
-                log("Roblox error prompt detected - Attempting to reconnect.")
-                sendNotification("Crash Prevention", "Game error detected. Reconnecting...", CONFIG.NOTIFICATION_DURATION, "alert")
+            if descendant:IsA("Frame") and (descendant.Name == "ErrorPrompt" or descendant.Name == "DisconnectedPrompt") then
+                log("Roblox error/disconnect prompt detected - Attempting to reconnect.")
+                sendNotification("Crash Prevention", "Game error/disconnect detected. Reconnecting...", CONFIG.NOTIFICATION_DURATION, "alert")
                 task.wait(CONFIG.RECONNECT_DELAY_SECONDS)
                 teleportService:Teleport(game.PlaceId)
             end
@@ -256,13 +320,12 @@ local function autoReconnect()
     end)
 end
 
-
 pcall(function()
+    initialQualityLevel = settings().Rendering.QualityLevel
     if settings().Rendering.QualityLevel > CONFIG.INITIAL_QUALITY_CAP then
         settings().Rendering.QualityLevel = CONFIG.INITIAL_QUALITY_CAP
         log("Reduced initial graphics quality for stability to level " .. CONFIG.INITIAL_QUALITY_CAP)
     end
-
     if CONFIG.DISABLE_WATER_REFLECTIONS then
         lighting.LegacyDynamicHeadsAndFaces = false
         lighting.WaterReflectance = 0
@@ -273,10 +336,9 @@ pcall(function()
         lighting.FogStart = math.huge
         log("Proactively disabled fog.")
     end
-
     if CONFIG.DISABLE_BLUR_EFFECTS then
-        for _, gui in pairs(game:GetService("CoreGui"):GetChildren()) do
-            if gui:IsA("ScreenGui") then
+        for _, gui in pairs({game:GetService("CoreGui"), players.LocalPlayer:FindFirstChild("PlayerGui")}) do
+            if gui then
                 for _, effect in pairs(gui:GetDescendants()) do
                     if effect:IsA("BlurEffect") or effect:IsA("DepthOfFieldEffect") then
                         effect.Enabled = false
@@ -286,8 +348,25 @@ pcall(function()
             end
         end
     end
+    if CONFIG.DISABLE_BLOOM_EFFECTS then
+        local bloom = lighting:FindFirstChildOfClass("BloomEffect")
+        if bloom then bloom.Enabled = false end
+        log("Proactively disabled Bloom effect.")
+    end
+    if CONFIG.DISABLE_COLOR_CORRECTION then
+        local cc = lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+        if cc then cc.Enabled = false end
+        log("Proactively disabled ColorCorrection effect.")
+    end
+    if CONFIG.DISABLE_POST_PROCESS_EFFECTS then
+        for _, effect in pairs(lighting:GetChildren()) do
+            if effect:IsA("PostEffect") then
+                effect.Enabled = false
+            end
+        end
+        log("Proactively disabled generic Post-Process effects.")
+    end
 end)
-
 
 runService.Heartbeat:Connect(function()
     lastHeartbeat = tick()
@@ -298,5 +377,6 @@ task.spawn(monitorFreeze)
 task.spawn(monitorPlayer)
 task.spawn(autoReconnect)
 task.spawn(monitorFPS)
+task.spawn(monitorNetwork)
 
 log("Zero-Crash Prevention System Loaded. Maximum stability initiated!")
