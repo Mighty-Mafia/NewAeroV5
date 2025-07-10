@@ -1,5 +1,6 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
+--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -1296,6 +1297,7 @@ end)
 
 run(function()
 	local old 
+	local AutoChargeTime 
 
 	AutoCharge = vape.Categories.Combat:CreateModule({
 	    Name = 'AutoCharge',
@@ -1305,12 +1307,12 @@ run(function()
 
 	            old = bedwars.SwordController.sendServerRequest
 	            bedwars.SwordController.sendServerRequest = function(self, ...)
-	              
-	                if (os.clock() - chargeSwingTime) < 0.5 then 
+
+	                if (os.clock() - chargeSwingTime) < AutoChargeTime.Value then 
 	                    return 
 	                end
 
-	                self.lastSwingServerTimeDelta = 0.5 
+	                self.lastSwingServerTimeDelta = AutoChargeTime.Value 
 	                chargeSwingTime = os.clock()
 
 	                return old(self, ...)
@@ -1324,6 +1326,14 @@ run(function()
 	    end,
 	    Tooltip = 'Allows you to get charged hits while spam clicking.'
 	})
+
+    AutoChargeTime = AutoCharge:CreateSlider({
+        Name = 'Charge Time',
+        Min = 0,
+        Max = 0.5,
+        Default = 0.4,
+        Decimal = 100 
+    })
 end)
 	
 run(function()
