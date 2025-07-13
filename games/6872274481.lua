@@ -2,6 +2,7 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
+--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -3013,6 +3014,57 @@ run(function()
 		Default = true
 	})
 end)
+
+run(function()
+    local AutoChargeBow = {Enabled = false}
+    local old
+    
+    AutoChargeBow = vape.Categories.Utility:CreateModule({
+        Name = 'AutoChargeBow',
+        Function = function(callback)
+            if callback then
+                old = bedwars.ProjectileController.calculateImportantLaunchValues
+                bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
+                    local self, projmeta, worldmeta, origin, shootpos = ...
+                    
+                    if projmeta.projectile:find('arrow') then
+                        local pos = shootpos or self:getLaunchPosition(origin)
+                        if not pos then
+                            return old(...)
+                        end
+                        
+                        local meta = projmeta:getProjectileMeta()
+                        local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
+                        local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
+                        local projSpeed = (meta.launchVelocity or 100)
+                        local offsetpos = pos + projmeta.fromPositionOffset
+                        
+                        local camera = workspace.CurrentCamera
+                        local mouse = lplr:GetMouse()
+                        local unitRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
+
+                        local targetPoint = unitRay.Origin + (unitRay.Direction * 1000)
+                        local aimDirection = (targetPoint - offsetpos).Unit
+                        
+                        return {
+                            initialVelocity = aimDirection * projSpeed,
+                            positionFrom = offsetpos,
+                            deltaT = lifetime,
+                            gravitationalAcceleration = gravity,
+                            drawDurationSeconds = 5
+                        }
+                    end
+                    
+                    return old(...)
+                end
+            else
+                bedwars.ProjectileController.calculateImportantLaunchValues = old
+            end
+        end,
+        Tooltip = 'Automatically charges your bow to full power without needing to hold it down'
+    })
+end)
+
 	
 run(function()
 	local ProjectileAura
