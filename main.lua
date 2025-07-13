@@ -1,8 +1,6 @@
 repeat task.wait() until game:IsLoaded()
 if shared.vape then shared.vape:Uninject() end
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/wrealaero/NewAeroV4/refs/heads/main/Anti-Crash.lua", true))()
-
 if identifyexecutor then
 	if table.find({'Argon', 'Wave'}, ({identifyexecutor()})[1]) then
 		getgenv().setthreadidentity = nil
