@@ -3037,17 +3037,20 @@ run(function()
                         local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
                         local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
                         local projSpeed = (meta.launchVelocity or 100)
-                        local offsetpos = pos + projmeta.fromPositionOffset
+                        local offsetpos = pos + (projmeta.projectile == 'owl_projectile' and Vector3.zero or projmeta.fromPositionOffset)
                         
                         local camera = workspace.CurrentCamera
                         local mouse = lplr:GetMouse()
                         local unitRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
-
+                        
                         local targetPoint = unitRay.Origin + (unitRay.Direction * 1000)
                         local aimDirection = (targetPoint - offsetpos).Unit
                         
+                        local newlook = CFrame.new(offsetpos, targetPoint) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
+                        local finalDirection = (targetPoint - newlook.Position).Unit
+                        
                         return {
-                            initialVelocity = aimDirection * projSpeed,
+                            initialVelocity = finalDirection * projSpeed,
                             positionFrom = offsetpos,
                             deltaT = lifetime,
                             gravitationalAcceleration = gravity,
@@ -3061,10 +3064,9 @@ run(function()
                 bedwars.ProjectileController.calculateImportantLaunchValues = old
             end
         end,
-        Tooltip = 'Automatically charges your bow to full power without needing to hold it down'
+        Tooltip = 'Automatically charges your bow to full power with trajectory line preview'
     })
 end)
-
 	
 run(function()
 	local ProjectileAura
