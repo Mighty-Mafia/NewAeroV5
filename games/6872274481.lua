@@ -2802,7 +2802,6 @@ run(function()
 		Tooltip = 'Prevents slowing down when using items.'
 	})
 end)
-	
 run(function()
 	local TargetPart
 	local Targets
@@ -2874,7 +2873,7 @@ run(function()
 		end
 	end
 	
-	ProjectileAimbot = vape.Categories.Blatant:CreateModule({
+	ProjectileAimbot = vape.Categories.World:CreateModule({
 		Name = 'ProjectileAimbot',
 		Function = function(callback)
 			if callback then
@@ -3014,6 +3013,155 @@ run(function()
 		Default = true
 	})
 end)
+
+local function EntityNearPosition(distance, ignore, overridepos)
+	local closestEntity, closestMagnitude = nil, distance
+	if entityLibrary.isAlive then
+		for i, v in pairs(entityLibrary.List) do
+			if not v.Targetable then continue end
+			local mag = (entityLibrary.character.HumanoidRootPart.Position - v.RootPart.Position).magnitude
+			if overridepos and mag > distance then
+				mag = (overridepos - v.RootPart.Position).magnitude
+			end
+			if mag <= closestMagnitude then
+				closestEntity, closestMagnitude = v, mag
+			end
+		end
+		if not ignore then
+			for i, v in pairs(collectionService:GetTagged("trainingRoomDummy")) do
+				if v.Name == "Void Enemy Dummy" or v.Name == "Emerald Enemy Dummy" or v.Name == "Diamond Enemy Dummy" or v.Name == "Leather Enemy Dummy" or v.Name == "Regular Enemy Dummy" or v.Name == "Iron Enemy Dummy" then
+					if v.PrimaryPart then
+						local mag = (entityLibrary.character.HumanoidRootPart.Position - v.PrimaryPart.Position).magnitude
+						if overridepos and mag > distance then
+							mag = (overridepos - v2.PrimaryPart.Position).magnitude
+						end
+						if mag <= closestMagnitude then
+							closestEntity, closestMagnitude = {Player = {Name = v.Name, UserId = (v.Name == "Duck" and 2020831224 or 1443379645)}, Character = v, RootPart = v.PrimaryPart, JumpTick = tick() + 5, Jumping = false, Humanoid = {HipHeight = 2}}, mag
+						end
+					end
+				end
+			end
+			for i, v in pairs(collectionService:GetTagged("Monster")) do
+				if v.PrimaryPart and v:GetAttribute("Team") ~= lplr:GetAttribute("Team") then
+					local mag = (entityLibrary.character.HumanoidRootPart.Position - v.PrimaryPart.Position).magnitude
+					if overridepos and mag > distance then
+						mag = (overridepos - v2.PrimaryPart.Position).magnitude
+					end
+					if mag <= closestMagnitude then
+						closestEntity, closestMagnitude = {Player = {Name = v.Name, UserId = (v.Name == "Duck" and 2020831224 or 1443379645)}, Character = v, RootPart = v.PrimaryPart, JumpTick = tick() + 5, Jumping = false, Humanoid = {HipHeight = 2}}, mag
+					end
+				end
+			end
+			for i, v in pairs(collectionService:GetTagged("GuardianOfDream")) do
+				if v.PrimaryPart and v:GetAttribute("Team") ~= lplr:GetAttribute("Team") then
+					local mag = (entityLibrary.character.HumanoidRootPart.Position - v.PrimaryPart.Position).magnitude
+					if overridepos and mag > distance then
+						mag = (overridepos - v2.PrimaryPart.Position).magnitude
+					end
+					if mag <= closestMagnitude then
+						closestEntity, closestMagnitude = {Player = {Name = v.Name, UserId = (v.Name == "Duck" and 2020831224 or 1443379645)}, Character = v, RootPart = v.PrimaryPart, JumpTick = tick() + 5, Jumping = false, Humanoid = {HipHeight = 2}}, mag
+					end
+				end
+			end
+			for i, v in pairs(collectionService:GetTagged("DiamondGuardian")) do
+				if v.PrimaryPart then
+					local mag = (entityLibrary.character.HumanoidRootPart.Position - v.PrimaryPart.Position).magnitude
+					if overridepos and mag > distance then
+						mag = (overridepos - v2.PrimaryPart.Position).magnitude
+					end
+					if mag <= closestMagnitude then
+						closestEntity, closestMagnitude = {Player = {Name = "DiamondGuardian", UserId = 1443379645}, Character = v, RootPart = v.PrimaryPart, JumpTick = tick() + 5, Jumping = false, Humanoid = {HipHeight = 2}}, mag
+					end
+				end
+			end
+			for i, v in pairs(collectionService:GetTagged("GolemBoss")) do
+				if v.PrimaryPart then
+					local mag = (entityLibrary.character.HumanoidRootPart.Position - v.PrimaryPart.Position).magnitude
+					if overridepos and mag > distance then
+						mag = (overridepos - v2.PrimaryPart.Position).magnitude
+					end
+					if mag <= closestMagnitude then
+						closestEntity, closestMagnitude = {Player = {Name = "GolemBoss", UserId = 1443379645}, Character = v, RootPart = v.PrimaryPart, JumpTick = tick() + 5, Jumping = false, Humanoid = {HipHeight = 2}}, mag
+					end
+				end
+			end
+			for i, v in pairs(collectionService:GetTagged("Drone")) do
+				if v.PrimaryPart and tonumber(v:GetAttribute("PlayerUserId")) ~= lplr.UserId then
+					local droneplr = playersService:GetPlayerByUserId(v:GetAttribute("PlayerUserId"))
+					if droneplr and droneplr.Team == lplr.Team then continue end
+					local mag = (entityLibrary.character.HumanoidRootPart.Position - v.PrimaryPart.Position).magnitude
+					if overridepos and mag > distance then
+						mag = (overridepos - v.PrimaryPart.Position).magnitude
+					end
+					if mag <= closestMagnitude then -- magcheck
+						closestEntity, closestMagnitude = {Player = {Name = "Drone", UserId = 1443379645}, Character = v, RootPart = v.PrimaryPart, JumpTick = tick() + 5, Jumping = false, Humanoid = {HipHeight = 2}}, mag
+					end
+				end
+			end
+			for i,v in pairs(game.Workspace:GetChildren()) do
+				if v.Name == "InfectedCrateEntity" and v.ClassName == "Model" and v.PrimaryPart then
+					local mag = (entityLibrary.character.HumanoidRootPart.Position - v.PrimaryPart.Position).magnitude
+					if overridepos and mag > distance then
+						mag = (overridepos - v.PrimaryPart.Position).magnitude
+					end
+					if mag <= closestMagnitude then -- magcheck
+						closestEntity, closestMagnitude = {Player = {Name = "InfectedCrateEntity", UserId = 1443379645}, Character = v, RootPart = v.PrimaryPart, JumpTick = tick() + 5, Jumping = false, Humanoid = {HipHeight = 2}}, mag
+					end
+				end
+			end
+		end
+	end
+	return closestEntity
+end
+
+local function Filter(tbl, check)
+	for i,v in pairs(tbl) do
+		if check(v) then return v end
+	end
+	return nil
+end
+
+local function Wallcheck(attackerCharacter, targetCharacter, additionalIgnore)
+    if not (attackerCharacter and targetCharacter) then
+        return false
+    end
+
+    local humanoidRootPart = attackerCharacter.PrimaryPart
+    local targetRootPart = targetCharacter.PrimaryPart
+    if not (humanoidRootPart and targetRootPart) then
+        return false
+    end
+
+    local origin = humanoidRootPart.Position
+    local targetPosition = targetRootPart.Position
+    local direction = targetPosition - origin
+
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.RespectCanCollide = true
+
+    local ignoreList = {attackerCharacter}
+    
+    if additionalIgnore and typeof(additionalIgnore) == "table" then
+        for _, item in pairs(additionalIgnore) do
+            table.insert(ignoreList, item)
+        end
+    end
+
+    raycastParams.FilterDescendantsInstances = ignoreList
+
+    local raycastResult = workspace:Raycast(origin, direction, raycastParams)
+
+    if raycastResult then
+        if raycastResult.Instance:IsDescendantOf(targetCharacter) then
+            return true
+        else
+            return false
+        end
+    else
+        return true
+    end
+end
 
 run(function()
     local AutoChargeBow = {Enabled = false}
