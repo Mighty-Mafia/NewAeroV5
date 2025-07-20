@@ -3,6 +3,7 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
+--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -1297,7 +1298,7 @@ run(function()
 	StrafeIncrease = AimAssist:CreateToggle({Name = 'Strafe increase'})
 end)
 
-run(function()
+--[[run(function()
 	local old 
 	local AutoChargeTime 
 
@@ -1336,7 +1337,7 @@ run(function()
         Default = 0.4,
         Decimal = 100 
     })
-end)
+end)--]]
 	
 run(function()
 	local AutoClicker
@@ -2050,17 +2051,16 @@ run(function()
 	local Killaura
 	local Targets
 	local Sort
-	local SwingRange
-	local AttackRange
-	local ChargeTime
+	local Range
+	local RangeCircle
+	local RangeCirclePart
 	local UpdateRate
 	local AngleSlider
 	local MaxTargets
 	local Mouse
 	local Swing
 	local GUI
-	local BoxSwingColor
-	local BoxAttackColor
+	local BoxColor
 	local ParticleTexture
 	local ParticleColor1
 	local ParticleColor2
@@ -2071,13 +2071,71 @@ run(function()
 	local AnimationSpeed
 	local AnimationTween
 	local Limit
-	local LegitAura = {}
+	local LegitAura
 	local Particles, Boxes = {}, {}
 	local anims, AnimDelay, AnimTween, armC0 = vape.Libraries.auraanims, tick()
 	local AttackRemote = {FireServer = function() end}
 	task.spawn(function()
-		AttackRemote = bedwars.Client:Get(remotes.AttackEntity).instance
+		AttackRemote = remotes.AttackEntity
+		AttackRemote.FireServer = function(self, attackTable, ...)
+			local suc, plr = pcall(function()
+				return playersService:GetPlayerFromCharacter(attackTable.entityInstance)
+			end)
+
+			local selfpos = attackTable.validate.selfPosition.value
+			local targetpos = attackTable.validate.targetPosition.value
+			store.attackReach = ((selfpos - targetpos).Magnitude * 100) // 1 / 100
+			store.attackReachUpdate = tick() + 1
+
+			if Reach.Enabled or HitBoxes.Enabled then
+				attackTable.validate.raycast = attackTable.validate.raycast or {}
+				attackTable.validate.selfPosition.value += CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
+			end
+
+			if suc and plr then
+				if not select(2, whitelist:get(plr)) then return end
+			end
+
+			return self:SendToServer(attackTable, ...)
+		end
 	end)
+
+	local lastSwingServerTime = 0
+	local lastSwingServerTimeDelta = 0
+
+	local function createRangeCircle()
+		local suc, err = pcall(function()
+			if (not shared.CheatEngineMode) then
+				RangeCirclePart = Instance.new("MeshPart")
+				RangeCirclePart.MeshId = "rbxassetid://3726303797"
+				if shared.RiseMode and GuiLibrary.GUICoreColor and GuiLibrary.GUICoreColorChanged then
+					RangeCirclePart.Color = GuiLibrary.GUICoreColor
+					GuiLibrary.GUICoreColorChanged.Event:Connect(function()
+						RangeCirclePart.Color = GuiLibrary.GUICoreColor
+					end)
+				else
+					RangeCirclePart.Color = Color3.fromHSV(BoxColor["Hue"], BoxColor["Sat"], BoxColor.Value)
+				end
+				RangeCirclePart.CanCollide = false
+				RangeCirclePart.Anchored = true
+				RangeCirclePart.Material = Enum.Material.Neon
+				RangeCirclePart.Size = Vector3.new(Range.Value * 0.7, 0.01, Range.Value * 0.7)
+				if Killaura.Enabled then
+					RangeCirclePart.Parent = gameCamera
+				end
+				RangeCirclePart:SetAttribute("gamecore_GameQueryIgnore", true)
+			end
+		end)
+		if (not suc) then
+			pcall(function()
+				if RangeCirclePart then
+					RangeCirclePart:Destroy()
+					RangeCirclePart = nil
+				end
+				InfoNotification("Killaura - Range Visualiser Circle", "There was an error creating the circle. Disabling...", 2)
+			end)
+		end
+	end
 
 	local function getAttackData()
 		if Mouse.Enabled then
@@ -2097,17 +2155,28 @@ run(function()
 		end
 
 		if LegitAura.Enabled then
-			if (tick() - bedwars.SwordController.lastSwing) > 0.2 then return false end
+			if workspace:GetServerTimeNow() - bedwars.SwordController.lastAttack > 0.2 then return false end
 		end
 
 		return sword, meta
 	end
 
+	local OneTapCooldown = {Value = 5}
+
+	local preserveSwordIcon = false
+	local sigridcheck = false
+
 	Killaura = vape.Categories.Blatant:CreateModule({
 		Name = 'Killaura',
 		Function = function(callback)
 			if callback then
-				if inputService.TouchEnabled then
+				lastSwingServerTime = Workspace:GetServerTimeNow()
+                lastSwingServerTimeDelta = 0
+				
+				if RangeCircle.Enabled then
+					createRangeCircle()
+				end
+				if inputService.TouchEnabled and not preserveSwordIcon then
 					pcall(function()
 						lplr.PlayerGui.MobileUI['2'].Visible = Limit.Enabled
 					end)
@@ -2121,15 +2190,18 @@ run(function()
 									return not Attacking
 								end,
 								playAnimation = function(...)
+									local args = {...}
 									if not Attacking then
-										bedwars.ViewmodelController:playAnimation(select(2, ...))
+										pcall(function()
+											bedwars.ViewmodelController:playAnimation(select(2, unpack(args)))
+										end)
 									end
 								end
 							}
 						}
 					}
-					debug.setupvalue(oldSwing or bedwars.SwordController.playSwordEffect, 6, fake)
-					debug.setupvalue(bedwars.ScytheController.playLocalAnimation, 3, fake)
+					--debug.setupvalue(bedwars.SwordController.playSwordEffect, 6, fake)
+					--debug.setupvalue(bedwars.ScytheController.playLocalAnimation, 3, fake)
 
 					task.spawn(function()
 						local started = false
@@ -2169,14 +2241,21 @@ run(function()
 					end)
 				end
 
-				local swingCooldown = 0
 				repeat
+					pcall(function()
+						if entitylib.isAlive and entitylib.character.HumanoidRootPart then
+							TweenService:Create(RangeCirclePart, TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {Position = entitylib.character.HumanoidRootPart.Position - Vector3.new(0, entitylib.character.Humanoid.HipHeight, 0)}):Play()
+						end
+					end)
 					local attacked, sword, meta = {}, getAttackData()
 					Attacking = false
 					store.KillauraTarget = nil
+					pcall(function() vapeTargetInfo.Targets.Killaura = nil end)
 					if sword then
+						if sigridcheck and entitylib.isAlive and lplr.Character:FindFirstChild("elk") then return end
+						local isClaw = string.find(string.lower(tostring(sword and sword.itemType or "")), "summoner_claw")
 						local plrs = entitylib.AllPosition({
-							Range = SwingRange.Value,
+							Range = Range.Value,
 							Wallcheck = Targets.Walls.Enabled or nil,
 							Part = 'RootPart',
 							Players = Targets.Players.Enabled,
@@ -2184,93 +2263,104 @@ run(function()
 							Limit = MaxTargets.Value,
 							Sort = sortmethods[Sort.Value]
 						})
-
 						if #plrs > 0 then
 							switchItem(sword.tool, 0)
 							local selfpos = entitylib.character.RootPart.Position
 							local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
 
 							for _, v in plrs do
+								--if workspace:GetServerTimeNow() - bedwars.SwordController.lastAttack < OneTapCooldown.Value/10 then continue end
 								local delta = (v.RootPart.Position - selfpos)
 								local angle = math.acos(localfacing:Dot((delta * Vector3.new(1, 0, 1)).Unit))
 								if angle > (math.rad(AngleSlider.Value) / 2) then continue end
 
-								table.insert(attacked, {
-									Entity = v,
-									Check = delta.Magnitude > AttackRange.Value and BoxSwingColor or BoxAttackColor
-								})
+								table.insert(attacked, v)
 								targetinfo.Targets[v] = tick() + 1
-
+								pcall(function()
+									local plr = v
+									vapeTargetInfo.Targets.Killaura = {
+										Humanoid = {
+											Health = (plr.Character:GetAttribute("Health") or plr.Humanoid.Health) + getShieldAttribute(plr.Character),
+											MaxHealth = plr.Character:GetAttribute("MaxHealth") or plr.Humanoid.MaxHealth
+										},
+										Player = plr.Player
+									}
+								end)
 								if not Attacking then
 									Attacking = true
 									store.KillauraTarget = v
-									if not Swing.Enabled and AnimDelay < tick() and not LegitAura.Enabled then
-										AnimDelay = tick() + (meta.sword.respectAttackSpeedForEffects and meta.sword.attackSpeed or math.max(ChargeTime.Value, 0.11))
-										bedwars.SwordController:playSwordEffect(meta, false)
-										if meta.displayName:find(' Scythe') then
-											bedwars.ScytheController:playLocalAnimation()
-										end
-
-										if vape.ThreadFix then
-											setthreadidentity(8)
+									if not isClaw then
+										if not Swing.Enabled and AnimDelay <= tick() and not LegitAura.Enabled then
+											AnimDelay = tick() + (meta.sword.respectAttackSpeedForEffects and meta.sword.attackSpeed or 0.25)
+											bedwars.SwordController:playSwordEffect(meta, false)
+											if meta.displayName:find(' Scythe') then
+												bedwars.ScytheController:playLocalAnimation()
+											end
+	
+											if vape.ThreadFix then
+												setthreadidentity(8)
+											end
 										end
 									end
 								end
-
-								if delta.Magnitude > AttackRange.Value then continue end
-								if delta.Magnitude < 14.4 and (tick() - swingCooldown) < math.max(ChargeTime.Value, 0.02) then continue end
-
 								local actualRoot = v.Character.PrimaryPart
 								if actualRoot then
 									local dir = CFrame.lookAt(selfpos, actualRoot.Position).LookVector
 									local pos = selfpos + dir * math.max(delta.Magnitude - 14.399, 0)
-									swingCooldown = tick()
+
 									bedwars.SwordController.lastAttack = workspace:GetServerTimeNow()
+                                    bedwars.SwordController.lastSwingServerTime = workspace:GetServerTimeNow()
+
+									lastSwingServerTimeDelta = workspace:GetServerTimeNow() - lastSwingServerTime
+                                    lastSwingServerTime = workspace:GetServerTimeNow()
+
 									store.attackReach = (delta.Magnitude * 100) // 1 / 100
 									store.attackReachUpdate = tick() + 1
-
-									if delta.Magnitude < 14.4 and ChargeTime.Value > 0.11 then
-										AnimDelay = tick()
+									if isClaw then
+										KaidaController:request(v.Character)
+									else
+										AttackRemote:FireServer({
+                                            weapon = sword.tool,
+                                            entityInstance = v.Character,
+                                            chargedAttack = {chargeRatio = 0},
+                                            validate = {
+                                                raycast = {
+                                                    cameraPosition = {value = pos},
+                                                    cursorDirection = {value = dir}
+                                                },
+                                                targetPosition = {value = actualRoot.Position},
+                                                selfPosition = {value = pos}
+                                            },
+                                            --lastSwingServerTimeDelta = lastSwingServerTimeDelta
+                                        })
 									end
-
-									AttackRemote:FireServer({
-										weapon = sword.tool,
-										chargedAttack = {chargeRatio = 0},
-										lastSwingServerTimeDelta = 0.5,
-										entityInstance = v.Character,
-										validate = {
-											raycast = {
-												cameraPosition = {value = pos},
-												cursorDirection = {value = dir}
-											},
-											targetPosition = {value = actualRoot.Position},
-											selfPosition = {value = pos}
-										}
-									})
 								end
 							end
 						end
 					end
 
-					for i, v in Boxes do
-						v.Adornee = attacked[i] and attacked[i].Entity.RootPart or nil
-						if v.Adornee then
-							v.Color3 = Color3.fromHSV(attacked[i].Check.Hue, attacked[i].Check.Sat, attacked[i].Check.Value)
-							v.Transparency = 1 - attacked[i].Check.Opacity
+					pcall(function()
+						for i, v in Boxes do
+							v.Adornee = attacked[i] and attacked[i].RootPart or nil
+							if v.Adornee then
+								v.Color3 = Color3.fromHSV(BoxColor.Hue, BoxColor.Sat, BoxColor.Value)
+								v.Transparency = 1 - BoxColor.Opacity
+							end
 						end
-					end
-
-					for i, v in Particles do
-						v.Position = attacked[i] and attacked[i].Entity.RootPart.Position or Vector3.new(9e9, 9e9, 9e9)
-						v.Parent = attacked[i] and gameCamera or nil
-					end
+	
+						for i, v in Particles do
+							v.Position = attacked[i] and attacked[i].RootPart.Position or Vector3.new(9e9, 9e9, 9e9)
+							v.Parent = attacked[i] and gameCamera or nil
+						end
+					end)
 
 					if Face.Enabled and attacked[1] then
-						local vec = attacked[1].Entity.RootPart.Position * Vector3.new(1, 0, 1)
+						local vec = attacked[1].RootPart.Position * Vector3.new(1, 0, 1)
 						entitylib.character.RootPart.CFrame = CFrame.lookAt(entitylib.character.RootPart.Position, Vector3.new(vec.X, entitylib.character.RootPart.Position.Y + 0.001, vec.Z))
 					end
+					pcall(function() if RangeCirclePart ~= nil then RangeCirclePart.Parent = gameCamera end end)
 
-					--#attacked > 0 and #attacked * 0.02 or
+					--task.wait(#attacked > 0 and #attacked * 0.02 or 1 / UpdateRate.Value)
 					task.wait(1 / UpdateRate.Value)
 				until not Killaura.Enabled
 			else
@@ -2286,8 +2376,8 @@ run(function()
 						lplr.PlayerGui.MobileUI['2'].Visible = true
 					end)
 				end
-				debug.setupvalue(oldSwing or bedwars.SwordController.playSwordEffect, 6, bedwars.Knit)
-				debug.setupvalue(bedwars.ScytheController.playLocalAnimation, 3, bedwars.Knit)
+				--debug.setupvalue(bedwars.SwordController.playSwordEffect, 6, bedwars.Knit)
+				--debug.setupvalue(bedwars.ScytheController.playLocalAnimation, 3, bedwars.Knit)
 				Attacking = false
 				if armC0 then
 					AnimTween = tweenService:Create(gameCamera.Viewmodel.RightHand.RightWrist, TweenInfo.new(AnimationTween.Enabled and 0.001 or 0.3, Enum.EasingStyle.Exponential), {
@@ -2295,10 +2385,23 @@ run(function()
 					})
 					AnimTween:Play()
 				end
+				if RangeCirclePart ~= nil then RangeCirclePart:Destroy() end
 			end
 		end,
 		Tooltip = 'Attack players around you\nwithout aiming at them.'
 	})
+
+	pcall(function()
+		local PSI = Killaura:CreateToggle({
+			Name = 'Preserve Sword Icon',
+			Function = function(callback)
+				preserveSwordIcon = callback
+			end,
+			Default = true
+		})
+		PSI.Object.Visible = inputService.TouchEnabled
+	end)
+
 	Targets = Killaura:CreateTargets({
 		Players = true,
 		NPCs = true
@@ -2309,16 +2412,7 @@ run(function()
 			table.insert(methods, i)
 		end
 	end
-	SwingRange = Killaura:CreateSlider({
-		Name = 'Swing range',
-		Min = 1,
-		Max = 18,
-		Default = 18,
-		Suffix = function(val)
-			return val == 1 and 'stud' or 'studs'
-		end
-	})
-	AttackRange = Killaura:CreateSlider({
+	Range = Killaura:CreateSlider({
 		Name = 'Attack range',
 		Min = 1,
 		Max = 18,
@@ -2327,12 +2421,25 @@ run(function()
 			return val == 1 and 'stud' or 'studs'
 		end
 	})
-	ChargeTime = Killaura:CreateSlider({
-		Name = 'Swing time',
+	--[[OneTapCooldown = Killaura:CreateSlider({
+		Name = "OneTap Cooldown",
+		Function = function() end,
 		Min = 0,
-		Max = 0.5,
-		Default = 0.42,
-		Decimal = 100
+		Max = 5,
+		Default = 4.2
+	})--]]
+	RangeCircle = Killaura:CreateToggle({
+		Name = "Range Visualiser",
+		Function = function(call)
+			if call then
+				createRangeCircle()
+			else
+				if RangeCirclePart then
+					RangeCirclePart:Destroy()
+					RangeCirclePart = nil
+				end
+			end
+		end
 	})
 	AngleSlider = Killaura:CreateSlider({
 		Name = 'Max angle',
@@ -2363,8 +2470,7 @@ run(function()
 	Killaura:CreateToggle({
 		Name = 'Show target',
 		Function = function(callback)
-			BoxSwingColor.Object.Visible = callback
-			BoxAttackColor.Object.Visible = callback
+			BoxColor.Object.Visible = callback
 			if callback then
 				for i = 1, 10 do
 					local box = Instance.new('BoxHandleAdornment')
@@ -2384,18 +2490,16 @@ run(function()
 			end
 		end
 	})
-	BoxSwingColor = Killaura:CreateColorSlider({
-		Name = 'Target Color',
-		Darker = true,
-		DefaultHue = 0.6,
-		DefaultOpacity = 0.5,
-		Visible = false
-	})
-	BoxAttackColor = Killaura:CreateColorSlider({
+	BoxColor = Killaura:CreateColorSlider({
 		Name = 'Attack Color',
 		Darker = true,
 		DefaultOpacity = 0.5,
-		Visible = false
+		Visible = false,
+		Function = function(hue, sat, val)
+			if Killaura.Enabled and RangeCirclePart ~= nil then
+				RangeCirclePart.Color = Color3.fromHSV(hue, sat, val)
+			end
+		end
 	})
 	Killaura:CreateToggle({
 		Name = 'Target particles',
@@ -2538,10 +2642,17 @@ run(function()
 		end,
 		Tooltip = 'Only attacks when the sword is held'
 	})
-	--[[LegitAura = Killaura:CreateToggle({
+	LegitAura = Killaura:CreateToggle({
 		Name = 'Swing only',
 		Tooltip = 'Only attacks while swinging manually'
-	})]]
+	})
+	Killaura:CreateToggle({
+		Name = "Sigrid Check",
+		Default = false,
+		Function = function(call)
+			sigridcheck = call
+		end
+	})
 end)
 	
 run(function()
@@ -5996,174 +6107,162 @@ run(function()
 	})
 end)
 
-run(function()
-    local AutoBank
-    local UIToggle
-    local UI
-    local Chests
-    local Items = {}
-    
-    local function addItem(itemType, bankable)
-        local item = Instance.new('ImageLabel')
-        item.Image = bedwars.getIcon({itemType = itemType}, true)
-        item.Size = UDim2.fromOffset(32, 32)
-        item.Name = itemType
-        item.BackgroundTransparency = 1
-        item.LayoutOrder = #UI:GetChildren()
-        item.Parent = UI
-        
-        local itemtext = Instance.new('TextLabel')
-        itemtext.Name = 'Amount'
-        itemtext.Size = UDim2.fromScale(1, 1)
-        itemtext.BackgroundTransparency = 1
-        itemtext.Text = ''
-        itemtext.TextColor3 = Color3.new(1, 1, 1)
-        itemtext.TextSize = 16
-        itemtext.TextStrokeTransparency = 0.3
-        itemtext.Font = Enum.Font.Arial
-        itemtext.Parent = item
-        
-        Items[itemType] = {Object = itemtext, Bankable = bankable}
-        print("AutoBank Debug: Added item to tracking: " .. itemType .. ", Bankable: " .. tostring(bankable))
-    end
-    
-    local function refreshBank(echest)
-        print("AutoBank Debug: Attempting to refresh bank UI.")
-        if not echest then
-            print("AutoBank Debug: RefreshBank: Ender chest object is NIL, cannot refresh UI.")
-            return
-        end
-        for i, v in Items do
-            local itemInChest = echest:FindFirstChild(i)
-            if itemInChest then
-                local amount = itemInChest:GetAttribute('Amount')
-                print("AutoBank Debug: RefreshBank: Found '" .. i .. "' in chest. Amount: " .. tostring(amount))
-                v.Object.Text = tostring(amount) or ''
-            else
-                print("AutoBank Debug: RefreshBank: '" .. i .. "' not found in chest (or is nil). Setting UI text to empty.")
-                v.Object.Text = ''
-            end
-        end
-    end
-    
-    local function nearChest()
-        if entitylib.isAlive and entitylib.character and entitylib.character.RootPart then
-            local pos = entitylib.character.RootPart.Position
-            if not Chests or #Chests == 0 then
-                 warn("AutoBank Warning: nearChest: 'Chests' table is empty or nil. Cannot check proximity.")
-                 return false
-            end
-            for _, chest in Chests do
-                if chest and chest.Position then
-                    local distance = (chest.Position - pos).Magnitude
-                    if distance < 20 then
-                        return true
-                    end
-                end
-            end
-        end
-        return false 
-    end
-    
-    local function handleState()
-        print("AutoBank Debug: handleState called.")
-        local personalChest = replicatedStorage.Inventories:FindFirstChild(lplr.Name..'_personal')
-        if not personalChest then 
-            print("AutoBank Debug: handleState: Personal chest '"..lplr.Name.."_personal' not found in ReplicatedStorage.Inventories. Cannot bank.")
-            return 
-        end
-        print("AutoBank Debug: handleState: Personal chest found: " .. personalChest.Name .. ", Class: " .. personalChest.ClassName)
-    
-        print("AutoBank Debug: Player is always attempting to deposit items (proximity check removed).")
-        local itemsToDepositCount = 0
-        for _, v in store.inventory.inventory.items do
-            local itemConfig = Items[v.itemType]
-            
-            if itemConfig and itemConfig.Bankable then 
-                itemsToDepositCount = itemsToDepositCount + 1
-                print("AutoBank Debug: handleState: Found bankable item in inventory: '" .. v.itemType .. "'. Item data (JSON): " .. httpService:JSONEncode(v))
-                
-                task.spawn(function()
-                    bedwars.Client:GetNamespace('Inventory'):Get('ChestGiveItem'):CallServer(personalChest, v.tool)
-                    
-                    print("AutoBank Debug: ChestGiveItem CallServer for '".. v.itemType .. "' (tool: " .. tostring(v.tool) .. ") called.")
-                    
-                    task.wait(0.1)
-                    refreshBank(personalChest)
-                end)
-            else
-            end
-        end
-        if itemsToDepositCount == 0 then
-            print("AutoBank Debug: handleState: No bankable items found in inventory to deposit.")
-        end
-    end
-    
-    AutoBank = vape.Categories.Inventory:CreateModule({
-        Name = 'AutoBank',
-        Function = function(callback)
-            if callback then
-                print("AutoBank Debug: Module enabled. Initializing...")
-                Chests = collection('personal-chest', AutoBank)
-                if not Chests or #Chests == 0 then
-                    warn("AutoBank Warning: No personal chests collected by 'collection'. AutoBank might not work correctly for other features.")
-                else
-                    print("AutoBank Debug: Collected " .. #Chests .. " personal chests.")
-                end
 
-                UI = Instance.new('Frame')
-                UI.Size = UDim2.new(1, 0, 0, 32)
-                UI.Position = UDim2.fromOffset(0, -240)
-                UI.BackgroundTransparency = 1
-                UI.Visible = UIToggle.Enabled
-                UI.Parent = vape.gui
-                AutoBank:Clean(UI)
-                
-                local Sort = Instance.new('UIListLayout')
-                Sort.FillDirection = Enum.FillDirection.Horizontal
-                Sort.HorizontalAlignment = Enum.HorizontalAlignment.Center
-                Sort.SortOrder = Enum.SortOrder.LayoutOrder
-                Sort.Parent = UI
-                
-                addItem('iron', true)
-                addItem('diamond', true)
-                addItem('emerald', true)
-                
-                local personalChestForInitialRefresh = replicatedStorage.Inventories:FindFirstChild(lplr.Name..'_personal')
-                if personalChestForInitialRefresh then
-                    refreshBank(personalChestForInitialRefresh)
-                else
-                    print("AutoBank Debug: Personal chest not found for initial UI refresh.")
-                end
-    
-                repeat
-                    local hotbar = lplr.PlayerGui:FindFirstChild('hotbar')
-                    hotbar = hotbar and hotbar['1']:FindFirstChild('HotbarHealthbarContainer')
-                    if hotbar then
-                        UI.Position = UDim2.fromOffset(0, (hotbar.AbsolutePosition.Y + guiService:GetGuiInset().Y) - 40)
-                    end
-    
-                    handleState()
-    
-                    task.wait(0.1)
-                until (not AutoBank.Enabled)
-            else
-                print("AutoBank Debug: Module disabled. Cleaning up items data.")
-                table.clear(Items)
-            end
-        end,
-        Tooltip = 'Automatically puts resources in ender chest'
-    })
-    
-    UIToggle = AutoBank:CreateToggle({
-        Name = 'UI',
-        Function = function(callback)
-            if AutoBank.Enabled then
-                UI.Visible = callback
-            end
-        end,
-        Default = true
-    })
+run(function()
+	local replicatedStorage = game:GetService("ReplicatedStorage")
+	local guiService = game:GetService("GuiService")
+
+	local AutoBank
+	local UIToggle
+	local UI
+	local Chests
+	local Items = {}
+
+	local AutoBankMode = {Value = "Toggle"}
+	
+	local function addItem(itemType, shop)
+		local item = Instance.new('ImageLabel')
+		item.Image = bedwars.getIcon({itemType = itemType}, true)
+		item.Size = UDim2.fromOffset(32, 32)
+		item.Name = itemType
+		item.BackgroundTransparency = 1
+		item.LayoutOrder = #UI:GetChildren()
+		item.Parent = UI
+		local itemtext = Instance.new('TextLabel')
+		itemtext.Name = 'Amount'
+		itemtext.Size = UDim2.fromScale(1, 1)
+		itemtext.BackgroundTransparency = 1
+		itemtext.Text = ''
+		itemtext.TextColor3 = Color3.new(1, 1, 1)
+		itemtext.TextSize = 16
+		itemtext.TextStrokeTransparency = 0.3
+		itemtext.Font = Enum.Font.Arial
+		itemtext.Parent = item
+		Items[itemType] = {Object = itemtext, Type = shop}
+	end
+	
+	local function refreshBank(echest)
+		for i, v in Items do
+			local item = echest:FindFirstChild(i)
+			v.Object.Text = item and item:GetAttribute('Amount') or ''
+		end
+	end
+	
+	local function nearChest()
+		if entitylib.isAlive then
+			local pos = entitylib.character.HumanoidRootPart.Position
+			for _, chest in Chests do
+				if (chest.Position - pos).Magnitude < 20 then
+					return true
+				end
+			end
+		end
+	end
+	
+	
+	local function handleState()
+		local chest = replicatedStorage.Inventories:FindFirstChild(lplr.Name..'_personal')
+		if not chest then return end
+	
+		local mapCF = workspace.MapCFrames:FindFirstChild((lplr:GetAttribute('Team') or 1)..'_spawn')
+		if AutoBankMode.Value ~= "Toggle" then
+			if not nearChest() then
+				warningNotification("AutoBank", "No chest close by.", 3)
+			else
+				warningNotification("AutoBank", "Successfully stored the loot in a personal chest!", 3)
+			end
+		end
+		if mapCF and nearChest() then
+			for _, v in chest:GetChildren() do
+				local item = Items[v.Name]
+				if item then
+					task.spawn(function()
+						bedwars.Client:GetNamespace('Inventory'):Get('ChestGetItem'):CallServer(chest, v)
+						refreshBank(chest)
+					end)
+				end
+			end
+		else
+			for _, v in store.inventory.inventory.items do
+				local item = Items[v.itemType]
+				if item then
+					task.spawn(function()
+						bedwars.Client:GetNamespace('Inventory'):Get('ChestGiveItem'):CallServer(chest, v.tool)
+						refreshBank(chest)
+					end)
+				end
+			end
+		end
+	end
+	
+	AutoBank = vape.Categories.Inventory:CreateModule({
+		Name = 'AutoBank',
+		Function = function(callback)
+			if callback then
+				Chests = collection('personal-chest', AutoBank)
+				UI = Instance.new('Frame')
+				UI.Size = UDim2.new(1, 0, 0, 32)
+				UI.Position = UDim2.fromOffset(0, -240)
+				UI.BackgroundTransparency = 1
+				UI.Visible = UIToggle.Enabled
+				UI.Parent = vape.gui
+				AutoBank:Clean(UI)
+				local Sort = Instance.new('UIListLayout')
+				Sort.FillDirection = Enum.FillDirection.Horizontal
+				Sort.HorizontalAlignment = Enum.HorizontalAlignment.Center
+				Sort.SortOrder = Enum.SortOrder.LayoutOrder
+				Sort.Parent = UI
+				addItem('iron', true)
+				addItem('gold', true)
+				addItem('diamond', false)
+				addItem('emerald', true)
+				addItem('void_crystal', true)
+	
+				task.spawn(function()
+					repeat
+						local hotbar = lplr.PlayerGui:FindFirstChild('hotbar')
+						hotbar = hotbar and hotbar['1']:FindFirstChild('HotbarHealthbarContainer')
+						if hotbar then
+							UI.Position = UDim2.fromOffset(0, (hotbar.AbsolutePosition.Y + guiService:GetGuiInset().Y) - 40)
+						end
+		
+						--local newState = nearChest()
+						--if newState then
+							handleState()
+						--end
+		
+						task.wait(0.1)
+					until (not AutoBank.Enabled)
+				end)
+
+				if AutoBankMode.Value ~= "Toggle" then
+					AutoBank:Toggle()
+				end
+			else
+				table.clear(Items)
+			end
+		end,
+		Tooltip = 'Automatically puts resources in ender chest'
+	})
+	AutoBankMode = AutoBank:CreateDropdown({
+		Name = "Activation",
+		List = {"On Key", "Toggle"},
+		Function = function()
+			if AutoBank.Enabled then
+				AutoBank:Toggle()
+				AutoBank:Toggle()
+			end
+		end
+	})
+	UIToggle = AutoBank:CreateToggle({
+		Name = 'UI',
+		Function = function(callback)
+			if AutoBank.Enabled then
+				UI.Visible = callback
+			end
+		end,
+		Default = true
+	})
 end)
 
 run(function()
