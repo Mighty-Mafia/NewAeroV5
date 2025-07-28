@@ -296,8 +296,8 @@ repeat task.wait() until game:IsLoaded()
 
 local Settings = {
     ToggleKeybind = "RightShift",
-    HitBoxesMode = "Sword",
-    HitBoxesExpandAmount = 18,
+    HitBoxesMode = "Player",
+    HitBoxesExpandAmount = 14.4,
 }
 
 local NotificationGui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
@@ -498,38 +498,44 @@ local function createHitbox(ent)
         HitBoxObjects[ent] = hitbox
     end
 end
+
 local function enableHitboxes()
     if not entitylib.Running then
         entitylib.start()
     end
 
-    -- Change sword reach constant (REAL hitbox effect)
-    if bedwars and bedwars.CombatConstant then
-        bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = Settings.HitBoxesExpandAmount or 14.4
-    end
-
-    -- Visual hitboxes (invisible welded parts)
-    local con1 = entitylib.Events.EntityAdded:Connect(createHitbox)
-    local con2 = entitylib.Events.EntityRemoved:Connect(function(ent)
-        if HitBoxObjects[ent] then
-            HitBoxObjects[ent]:Destroy()
-            HitBoxObjects[ent] = nil
+    if Settings.HitBoxesMode == 'Sword' then
+        if debug and debug.setconstant and bedwars and bedwars.SwordController and bedwars.SwordController.swingSwordInRegion then
+            debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (Settings.HitBoxesExpandAmount / 3))
+            setSwordModeConstant = true
         end
-    end)
-
-    table.insert(hitboxConnections, con1)
-    table.insert(hitboxConnections, con2)
-
-    for _, ent in entitylib.List do
-        createHitbox(ent)
+    else
+        if entitylib and entitylib.Events and entitylib.List then
+            local con1 = entitylib.Events.EntityAdded:Connect(createHitbox)
+            local con2 = entitylib.Events.EntityRemoved:Connect(function(ent)
+                if HitBoxObjects[ent] then
+                    HitBoxObjects[ent]:Destroy()
+                    HitBoxObjects[ent] = nil
+                end
+            end)
+            table.insert(hitboxConnections, con1)
+            table.insert(hitboxConnections, con2)
+            
+            for _, ent in entitylib.List do
+                createHitbox(ent)
+            end
+        end
     end
 end
 
 local function disableHitboxes()
-    if bedwars and bedwars.CombatConstant then
-        bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = 14.4 -- reset default
+    if setSwordModeConstant then
+        if debug and debug.setconstant and bedwars and bedwars.SwordController and bedwars.SwordController.swingSwordInRegion then
+            debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
+        end
+        setSwordModeConstant = false
     end
-
+    
     for _, part in HitBoxObjects do
         part:Destroy()
     end
@@ -540,57 +546,54 @@ local function disableHitboxes()
     end
     hitboxConnections = {}
 end
-local sprintConnection
+
+-- Sprint System
+local SprintEnabled = false
+local oldStopSprinting = nil
+
 local function enableSprint()
     if SprintEnabled then return end
-    if not bedwars or not bedwars.SprintController then return end
-
-    if inputService.TouchEnabled then
-        pcall(function()
-            lplr.PlayerGui.MobileUI['4'].Visible = false
+    if bedwars and bedwars.SprintController then
+        if inputService.TouchEnabled then 
+            pcall(function() 
+                lplr.PlayerGui.MobileUI['4'].Visible = false 
+            end) 
+        end
+        oldStopSprinting = bedwars.SprintController.stopSprinting
+        bedwars.SprintController.stopSprinting = function(...)
+            local call = oldStopSprinting(...)
+            bedwars.SprintController:startSprinting()
+            return call
+        end
+        local sprintConnection = entitylib.Events.LocalAdded:Connect(function() 
+            task.delay(0.1, function() 
+                if bedwars.SprintController then
+                    bedwars.SprintController:stopSprinting() 
+                end
+            end) 
         end)
+        table.insert(hitboxConnections, sprintConnection) -- Reuse connections table
+        if bedwars.SprintController then
+            bedwars.SprintController:stopSprinting()
+        end
+        SprintEnabled = true
     end
-
-    oldStopSprinting = bedwars.SprintController.stopSprinting
-    bedwars.SprintController.stopSprinting = function(...)
-        local call = oldStopSprinting(...)
-        bedwars.SprintController:startSprinting()
-        return call
-    end
-
-    sprintConnection = entitylib.Events.LocalAdded:Connect(function()
-        task.delay(0.1, function()
-            if bedwars.SprintController then
-                bedwars.SprintController:stopSprinting()
-            end
-        end)
-    end)
-
-    bedwars.SprintController:stopSprinting()
-    SprintEnabled = true
 end
 
 local function disableSprint()
     if not SprintEnabled then return end
     if bedwars and bedwars.SprintController and oldStopSprinting then
+        if inputService.TouchEnabled then 
+            pcall(function() 
+                lplr.PlayerGui.MobileUI['4'].Visible = true 
+            end) 
+        end
         bedwars.SprintController.stopSprinting = oldStopSprinting
         bedwars.SprintController:stopSprinting()
-
-        if inputService.TouchEnabled then
-            pcall(function()
-                lplr.PlayerGui.MobileUI['4'].Visible = true
-            end)
-        end
-
-        if sprintConnection then
-            sprintConnection:Disconnect()
-            sprintConnection = nil
-        end
+        SprintEnabled = false
+        oldStopSprinting = nil
     end
-    SprintEnabled = false
-    oldStopSprinting = nil
 end
-
 
 local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
