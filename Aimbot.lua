@@ -83,55 +83,58 @@ end
 if ExunysDeveloperAimbot and ExunysDeveloperAimbot.Exit then
 	ExunysDeveloperAimbot:Exit()
 end
+
+--// Environment
+
 getgenv().ExunysDeveloperAimbot = {
 	DeveloperSettings = {
-		UpdateMode = "RenderStepped", -- Best for smooth aiming
+		UpdateMode = "RenderStepped",
 		TeamCheckOption = "TeamColor",
-		RainbowSpeed = 1
+		RainbowSpeed = 1 -- Bigger = Slower
 	},
 
 	Settings = {
 		Enabled = true,
 
-		TeamCheck = true,       -- Avoid aiming at teammates
-		AliveCheck = true,      -- Only targets alive players
-		WallCheck = true,       -- Prevent aiming through walls
+		TeamCheck = true,
+		AliveCheck = true,
+		WallCheck = false,
 
-		OffsetToMoveDirection = true, -- Predicts movement a bit
-		OffsetIncrement = 20,         -- More offset = more prediction
+		OffsetToMoveDirection = false,
+		OffsetIncrement = 15,
 
-		Sensitivity = 0.15,     -- Smooth CFrame lock (0 = instant)
-		Sensitivity2 = 3.5,     -- For mousemoverel (used if LockMode = 2)
+		Sensitivity = 0, -- Animation length (in seconds) before fully locking onto target
+		Sensitivity2 = 3.5, -- mousemoverel Sensitivity
 
-		LockMode = 1,           -- 1 = CFrame lock (smoother, cleaner)
-		LockPart = "Head",      -- Head gives higher accuracy
+		LockMode = 1, -- 1 = CFrame; 2 = mousemoverel
+		LockPart = "Torso", -- Body part to lock on
 
-		TriggerKey = Enum.UserInputType.MouseButton2, -- Right-click
-		Toggle = false          -- Hold-to-aim (more legit)
+		TriggerKey = Enum.UserInputType.MouseButton2,
+		Toggle = false
 	},
 
 	FOVSettings = {
 		Enabled = true,
 		Visible = true,
 
-		Radius = 65,            -- Smaller FOV = more legit and accurate
-		NumSides = 100,         -- Smooth circle
+		Radius = 90,
+		NumSides = 60,
+
 		Thickness = 1,
 		Transparency = 1,
 		Filled = false,
 
 		RainbowColor = false,
 		RainbowOutlineColor = false,
-		Color = Color3.fromRGB(255, 255, 255),
-		OutlineColor = Color3.fromRGB(0, 0, 0),
-		LockedColor = Color3.fromRGB(255, 100, 100)
+		Color = Color3fromRGB(255, 255, 255),
+		OutlineColor = Color3fromRGB(0, 0, 0),
+		LockedColor = Color3fromRGB(255, 150, 150)
 	},
 
-	Blacklisted = {}, -- Add usernames here if needed
-	FOVCircleOutline = Drawing.new("Circle"),
-	FOVCircle = Drawing.new("Circle")
+	Blacklisted = {},
+	FOVCircleOutline = Drawingnew("Circle"),
+	FOVCircle = Drawingnew("Circle")
 }
-
 
 local Environment = getgenv().ExunysDeveloperAimbot
 
