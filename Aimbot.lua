@@ -100,7 +100,7 @@ getgenv().ExunysDeveloperAimbot = {
 		OffsetToMoveDirection = true, -- Predicts movement a bit
 		OffsetIncrement = 20,         -- More offset = more prediction
 
-		Sensitivity = 0.30,     -- Smooth CFrame lock (0 = instant)
+		Sensitivity = 0.15,     -- Smooth CFrame lock (0 = instant)
 		Sensitivity2 = 3.5,     -- For mousemoverel (used if LockMode = 2)
 
 		LockMode = 1,           -- 1 = CFrame lock (smoother, cleaner)
