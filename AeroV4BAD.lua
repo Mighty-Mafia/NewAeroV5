@@ -298,8 +298,8 @@ repeat task.wait() until game:IsLoaded()
 local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Sword", -- "Sword" or "Player"
-    HitBoxesExpandAmount = 6, -- Amount to expand hitboxes
-    HitFixEnabled = false, -- Whether hitfix starts enabled
+    HitBoxesExpandAmount = 8, -- Amount to expand hitboxes
+    HitFixEnabled = true, -- Whether hitfix starts enabled
 }
 
 local NotificationGui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
