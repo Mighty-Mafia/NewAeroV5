@@ -107,7 +107,7 @@ getgenv().ExunysDeveloperAimbot = {
 		Sensitivity2 = 3.5, -- mousemoverel Sensitivity
 
 		LockMode = 1, -- 1 = CFrame; 2 = mousemoverel
-		LockPart = "Body", -- Body part to lock on
+		LockPart = "Torso", -- Body part to lock on
 
 		TriggerKey = Enum.UserInputType.MouseButton2,
 		Toggle = false
