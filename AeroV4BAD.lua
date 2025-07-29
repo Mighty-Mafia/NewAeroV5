@@ -294,10 +294,12 @@ local mainTweenService = cloneref(game:GetService('TweenService'))
 
 repeat task.wait() until game:IsLoaded()
 
+-- Settings (You can modify these values)
 local Settings = {
     ToggleKeybind = "RightShift",
-    HitBoxesMode = "Player",
-    HitBoxesExpandAmount = 14.4,
+    HitBoxesMode = "Sword", -- "Sword" or "Player"
+    HitBoxesExpandAmount = 6, -- Amount to expand hitboxes
+    HitFixEnabled = false, -- Whether hitfix starts enabled
 }
 
 local NotificationGui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
@@ -344,6 +346,83 @@ local function showNotification(message, duration)
     notification:TweenPosition(UDim2.new(0.5, -175, 0, -70), "In", "Quad", 0.3, true)
     task.wait(0.3)
     notification:Destroy()
+end
+
+-- Wait for bedwars to load (from crazyscript)
+local function waitForBedwars()
+    local attempts = 0
+    local maxAttempts = 100
+    
+    while attempts < maxAttempts do
+        attempts = attempts + 1
+        
+        local success, knit = pcall(function()
+            return debug.getupvalue(require(lplr.PlayerScripts.TS.knit).setup, 9)
+        end)
+        
+        if success and knit then
+            -- Wait for knit to actually start
+            local startAttempts = 0
+            while not debug.getupvalue(knit.Start, 1) and startAttempts < 50 do
+                startAttempts = startAttempts + 1
+                task.wait(0.1)
+            end
+            
+            if debug.getupvalue(knit.Start, 1) then
+                print("✅ BEDWARS LOADED AFTER " .. attempts .. " ATTEMPTS")
+                return knit
+            end
+        end
+        
+        task.wait(0.1)
+    end
+    
+    print("❌ BEDWARS FAILED TO LOAD")
+    return nil
+end
+
+-- Initialize bedwars
+local knit = waitForBedwars()
+local bedwars = {}
+
+local function setupBedwars()
+    if not knit then return false end
+    
+    local success = pcall(function()
+        -- Get client for remotes
+        bedwars.Client = require(mainReplicatedStorage.TS.remotes).default.Client
+        
+        -- Get sword controller
+        bedwars.SwordController = knit.Controllers.SwordController
+        
+        -- Get sprint controller
+        bedwars.SprintController = knit.Controllers.SprintController
+        
+        -- Get query util for hitfix
+        local queryUtilSuccess, queryUtil = pcall(function()
+            return require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil
+        end)
+        if queryUtilSuccess then
+            bedwars.QueryUtil = queryUtil
+        end
+        
+        print("✅ BEDWARS COMPONENTS LOADED")
+        return true
+    end)
+    
+    if not success then
+        print("❌ FAILED TO SETUP BEDWARS COMPONENTS")
+    end
+    
+    return success
+end
+
+local bedwarsLoaded = setupBedwars()
+
+print("🔍 DEBUG - SprintController:", bedwars.SprintController and "FOUND" or "NIL")
+if bedwars.SprintController then
+    print("🔍 DEBUG - startSprinting:", bedwars.SprintController.startSprinting and "FOUND" or "NIL")
+    print("🔍 DEBUG - stopSprinting:", bedwars.SprintController.stopSprinting and "FOUND" or "NIL")
 end
 
 local collectionService = game:GetService("CollectionService")
@@ -475,124 +554,263 @@ local function disableInstantPP()
     InstantPPActive = false
 end
 
--- Fixed Hitboxes System
-local HitBoxObjects = {}
-local setSwordModeConstant = false
+-- HITFIX IMPLEMENTATION (from crazyscript)
+local HitFixEnabled = Settings.HitFixEnabled
+local hitfixOriginalState = nil
+
+local function setupHitFix()
+    if not bedwarsLoaded or not bedwars.SwordController or not bedwars.SwordController.swingSwordAtMouse then
+        return false
+    end
+    
+    local function applyHitFix(enabled)
+        local success = pcall(function()
+            if enabled then
+                debug.setconstant(bedwars.SwordController.swingSwordAtMouse, 23, 'raycast')
+                debug.setupvalue(bedwars.SwordController.swingSwordAtMouse, 4, bedwars.QueryUtil or workspace)
+            else
+                debug.setconstant(bedwars.SwordController.swingSwordAtMouse, 23, 'Raycast')
+                debug.setupvalue(bedwars.SwordController.swingSwordAtMouse, 4, workspace)
+            end
+        end)
+        
+        return success
+    end
+    
+    -- Store original state
+    if hitfixOriginalState == nil then
+        hitfixOriginalState = false -- Default state
+    end
+    
+    return applyHitFix(HitFixEnabled)
+end
+
+local function enableHitFix()
+    if not bedwarsLoaded then return false end
+    HitFixEnabled = true
+    return setupHitFix()
+end
+
+local function disableHitFix()
+    if not bedwarsLoaded then return false end
+    HitFixEnabled = false
+    return setupHitFix()
+end
+
+-- IMPROVED HITBOXES SYSTEM (from crazyscript)
+local hitboxParts = {}
+local swordHitboxEnabled = false
 local hitboxConnections = {}
 
-local function createHitbox(ent)
-    if ent and ent.Targetable and ent.Player and ent.Character and ent.RootPart then
-        local hitbox = Instance.new('Part')
-        hitbox.Size = Vector3.new(3, 6, 3) + Vector3.one * (Settings.HitBoxesExpandAmount / 5)
-        hitbox.Position = ent.RootPart.Position
-        hitbox.CanCollide = false
-        hitbox.Massless = true
-        hitbox.Transparency = 1
-        hitbox.Parent = ent.Character
-        
-        local weld = Instance.new('Motor6D')
-        weld.Part0 = hitbox
-        weld.Part1 = ent.RootPart
-        weld.Parent = hitbox
-        
-        HitBoxObjects[ent] = hitbox
+local function setupHitBoxes()
+    if not bedwarsLoaded or not bedwars.SwordController then
+        return false
     end
+    
+    local function applySwordHitBox(enabled)
+        if not bedwars.SwordController.swingSwordInRegion then
+            return false
+        end
+        
+        local success = pcall(function()
+            if enabled then
+                debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, Settings.HitBoxesExpandAmount)
+                swordHitboxEnabled = true
+            else
+                debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
+                swordHitboxEnabled = false
+            end
+        end)
+        return success
+    end
+    
+    local function createPlayerHitBox(player)
+        if player == lplr or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+            return
+        end
+        
+        local success = pcall(function()
+            local char = player.Character
+            local hrp = char.HumanoidRootPart
+            
+            -- Remove old hitbox if exists
+            if hitboxParts[player] then
+                hitboxParts[player]:Destroy()
+            end
+            
+            -- Create new hitbox
+            local hitbox = Instance.new("Part")
+            hitbox.Name = "CustomHitBox"
+            hitbox.Size = Vector3.new(Settings.HitBoxesExpandAmount, Settings.HitBoxesExpandAmount, Settings.HitBoxesExpandAmount)
+            hitbox.Position = hrp.Position
+            hitbox.CanCollide = false
+            hitbox.Massless = true
+            hitbox.Transparency = 1 -- Invisible hitboxes
+            hitbox.Parent = char
+            
+            -- Weld to player
+            local weld = Instance.new("WeldConstraint")
+            weld.Part0 = hitbox
+            weld.Part1 = hrp
+            weld.Parent = hitbox
+            
+            hitboxParts[player] = hitbox
+        end)
+        
+        return success
+    end
+    
+    local function clearPlayerHitBoxes()
+        for player, part in pairs(hitboxParts) do
+            if part and part.Parent then
+                part:Destroy()
+            end
+        end
+        hitboxParts = {}
+    end
+    
+    local function applyPlayerHitBoxes(enabled)
+        if enabled then
+            -- Create hitboxes for all players
+            for _, player in pairs(playersService:GetPlayers()) do
+                if player ~= lplr then
+                    createPlayerHitBox(player)
+                end
+            end
+            
+            -- Connect to new players
+            local newPlayerConnection = playersService.PlayerAdded:Connect(function(player)
+                if player ~= lplr then
+                    player.CharacterAdded:Connect(function()
+                        task.wait(1) -- Wait for character to fully load
+                        createPlayerHitBox(player)
+                    end)
+                end
+            end)
+            table.insert(hitboxConnections, newPlayerConnection)
+            
+            -- Connect to character respawns
+            for _, player in pairs(playersService:GetPlayers()) do
+                if player ~= lplr then
+                    local charConnection = player.CharacterAdded:Connect(function()
+                        task.wait(1)
+                        createPlayerHitBox(player)
+                    end)
+                    table.insert(hitboxConnections, charConnection)
+                end
+            end
+        else
+            clearPlayerHitBoxes()
+        end
+    end
+    
+    return {
+        applySwordHitBox = applySwordHitBox,
+        applyPlayerHitBoxes = applyPlayerHitBoxes,
+        clearPlayerHitBoxes = clearPlayerHitBoxes
+    }
 end
+
+local hitboxSystem = setupHitBoxes()
+local HitBoxesEnabled = false
 
 local function enableHitboxes()
     if not entitylib.Running then
         entitylib.start()
     end
+    
+    if not hitboxSystem then
+        return false
+    end
 
     if Settings.HitBoxesMode == 'Sword' then
-        if debug and debug.setconstant and bedwars and bedwars.SwordController and bedwars.SwordController.swingSwordInRegion then
-            debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (Settings.HitBoxesExpandAmount / 3))
-            setSwordModeConstant = true
+        local success = hitboxSystem.applySwordHitBox(true)
+        if success then
+            HitBoxesEnabled = true
+            return true
         end
-    else
-        if entitylib and entitylib.Events and entitylib.List then
-            local con1 = entitylib.Events.EntityAdded:Connect(createHitbox)
-            local con2 = entitylib.Events.EntityRemoved:Connect(function(ent)
-                if HitBoxObjects[ent] then
-                    HitBoxObjects[ent]:Destroy()
-                    HitBoxObjects[ent] = nil
-                end
-            end)
-            table.insert(hitboxConnections, con1)
-            table.insert(hitboxConnections, con2)
-            
-            for _, ent in entitylib.List do
-                createHitbox(ent)
-            end
-        end
+    else 
+        hitboxSystem.applyPlayerHitBoxes(true)
+        HitBoxesEnabled = true
+        return true
     end
+    
+    return false
 end
 
 local function disableHitboxes()
-    if setSwordModeConstant then
-        if debug and debug.setconstant and bedwars and bedwars.SwordController and bedwars.SwordController.swingSwordInRegion then
-            debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
-        end
-        setSwordModeConstant = false
+    if not hitboxSystem then
+        return false
     end
     
-    for _, part in HitBoxObjects do
-        part:Destroy()
+    if Settings.HitBoxesMode == 'Sword' then
+        hitboxSystem.applySwordHitBox(false)
+    else
+        hitboxSystem.applyPlayerHitBoxes(false)
     end
-    table.clear(HitBoxObjects)
-
+    
     for _, v in pairs(hitboxConnections) do
         pcall(function() v:Disconnect() end)
     end
     hitboxConnections = {}
+    
+    HitBoxesEnabled = false
+    return true
 end
 
--- Sprint System
 local SprintEnabled = false
-local oldStopSprinting = nil
+local old = nil
+local sprintConnection = nil
 
 local function enableSprint()
-    if SprintEnabled then return end
-    if bedwars and bedwars.SprintController then
-        if inputService.TouchEnabled then 
-            pcall(function() 
-                lplr.PlayerGui.MobileUI['4'].Visible = false 
-            end) 
-        end
-        oldStopSprinting = bedwars.SprintController.stopSprinting
-        bedwars.SprintController.stopSprinting = function(...)
-            local call = oldStopSprinting(...)
-            bedwars.SprintController:startSprinting()
-            return call
-        end
-        local sprintConnection = entitylib.Events.LocalAdded:Connect(function() 
-            task.delay(0.1, function() 
-                if bedwars.SprintController then
-                    bedwars.SprintController:stopSprinting() 
-                end
-            end) 
-        end)
-        table.insert(hitboxConnections, sprintConnection) -- Reuse connections table
-        if bedwars.SprintController then
-            bedwars.SprintController:stopSprinting()
-        end
-        SprintEnabled = true
+    if SprintEnabled or not bedwarsLoaded or not bedwars.SprintController then return end
+    
+    if inputService.TouchEnabled then 
+        pcall(function() 
+            lplr.PlayerGui.MobileUI['4'].Visible = false 
+        end) 
     end
+    
+    old = bedwars.SprintController.stopSprinting
+    bedwars.SprintController.stopSprinting = function(...)
+        local call = old(...)
+        bedwars.SprintController:startSprinting()
+        return call
+    end
+    
+    sprintConnection = entitylib.Events.LocalAdded:Connect(function() 
+        task.delay(0.1, function() 
+            if bedwars.SprintController then
+                bedwars.SprintController:stopSprinting() 
+            end
+        end) 
+    end)
+    
+    bedwars.SprintController:stopSprinting()
+    SprintEnabled = true
 end
 
 local function disableSprint()
-    if not SprintEnabled then return end
-    if bedwars and bedwars.SprintController and oldStopSprinting then
-        if inputService.TouchEnabled then 
-            pcall(function() 
-                lplr.PlayerGui.MobileUI['4'].Visible = true 
-            end) 
-        end
-        bedwars.SprintController.stopSprinting = oldStopSprinting
-        bedwars.SprintController:stopSprinting()
-        SprintEnabled = false
-        oldStopSprinting = nil
+    if not SprintEnabled or not bedwarsLoaded or not bedwars.SprintController then return end
+    
+    if inputService.TouchEnabled then 
+        pcall(function() 
+            lplr.PlayerGui.MobileUI['4'].Visible = true 
+        end) 
     end
+    
+    if old then
+        bedwars.SprintController.stopSprinting = old
+        bedwars.SprintController:stopSprinting()
+        old = nil
+    end
+    
+    if sprintConnection then
+        sprintConnection:Disconnect()
+        sprintConnection = nil
+    end
+    
+    SprintEnabled = false
 end
 
 local UserInputService = game:GetService("UserInputService")
@@ -603,6 +821,9 @@ local function enableAllFeatures()
     enableInstantPP()
     enableHitboxes()
     enableSprint()
+    if Settings.HitFixEnabled then
+        enableHitFix()
+    end
     allFeaturesEnabled = true
 end
 
@@ -611,6 +832,7 @@ local function disableAllFeatures()
     disableInstantPP()
     disableHitboxes()
     disableSprint()
+    disableHitFix()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -632,10 +854,17 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- Start entitylib first
 entitylib.start()
+
+if bedwarsLoaded then
+    setupHitFix()
+end
 
 enableAllFeatures()
 task.spawn(function()
-    showNotification("Script loaded and enabled. Press RightShift to toggle on/off.", 4)
+    local statusMsg = "Script loaded and enabled. Press RightShift to toggle on/off."
+    if bedwarsLoaded then
+        statusMsg = statusMsg .. " HitFix: " .. (Settings.HitFixEnabled and "ON" or "OFF") .. ", HitBoxes: " .. Settings.HitBoxesMode
+    end
+    showNotification(statusMsg, 4)
 end)
