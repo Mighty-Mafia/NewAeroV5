@@ -316,13 +316,6 @@ local Settings = {
     HitFixEnabled = true, 
 }
 
-local AutoClickerSettings = {
-    Enabled = true,
-    CPS = 7,
-    PlaceBlocks = true,
-    BlockCPS = 12
-}
-
 -- Clean up existing notification GUI
 pcall(function()
     if mainPlayersService.LocalPlayer.PlayerGui:FindFirstChild("VapeNotifications") then
@@ -427,22 +420,6 @@ local function setupBedwars()
         
         bedwars.SprintController = knit.Controllers.SprintController
         
-        -- Add missing components for auto-clicker
-        bedwars.AppController = knit.Controllers.AppController
-        bedwars.BlockPlacementController = knit.Controllers.BlockPlacementController
-        bedwars.BlockPlacementController:startController()
-
-        repeat task.wait() until bedwars.BlockPlacementController.blockPlacer ~= nil
-
-        bedwars.BlockCpsController = knit.Controllers.BlockCpsController
-        bedwars.BlockCpsController.lastPlaceTimestamp = 0
-
-        
-        -- Add UILayers
-        bedwars.UILayers = {
-            MAIN = "MainLayer"
-        }
-        
         local queryUtilSuccess, queryUtil = pcall(function()
             return require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil
         end)
@@ -463,163 +440,10 @@ end
 
 local bedwarsLoaded = setupBedwars()
 
-if bedwars.BlockPlacer and bedwars.BlockEngine then
-    store.blockPlacer = bedwars.BlockPlacer.new(bedwars.BlockEngine, "wool_white")
-else
-    warn("❌ BlockPlacer or BlockEngine not loaded yet.")
-end
-
 print("🔍 DEBUG - SprintController:", bedwars.SprintController and "FOUND" or "NIL")
 if bedwars.SprintController then
     print("🔍 DEBUG - startSprinting:", bedwars.SprintController.startSprinting and "FOUND" or "NIL")
     print("🔍 DEBUG - stopSprinting:", bedwars.SprintController.stopSprinting and "FOUND" or "NIL")
-end
-
--- AUTO-CLICKER IMPLEMENTATION
-local AutoClickerEnabled = false
-local AutoClickerThread = nil
-local AutoClickerConnections = {}
-
--- Store table to track what tool is being held
-local store = {
-    hand = {
-        toolType = "sword"
-    }
-}
-
--- Update store.hand.toolType based on held tool
-local function updateHeldTool()
-    if not lplr.Character then 
-        store.hand.toolType = "sword"
-        return 
-    end
-    
-    local tool = lplr.Character:FindFirstChildOfClass("Tool")
-    if not tool then 
-        store.hand.toolType = "sword"
-        return 
-    end
-    
-    local toolName = tool.Name:lower()
-    if toolName:find("sword") or toolName:find("blade") or toolName:find("katana") then
-        store.hand.toolType = "sword"
-    elseif toolName:find("block") or toolName:find("wool") or toolName:find("wood") or toolName:find("stone") then
-        store.hand.toolType = "block"
-    elseif toolName:find("axe") or toolName:find("pick") then
-        store.hand.toolType = "breaker"
-    else
-        store.hand.toolType = "sword"
-    end
-    end
-
-
-local function AutoClick()
-    if AutoClickerThread then
-        task.cancel(AutoClickerThread)
-        AutoClickerThread = nil
-    end
-
-    AutoClickerThread = task.spawn(function()
-        while AutoClickerEnabled do
-            updateHeldTool()
-
-            if bedwars then
-            local tool = lplr.Character and lplr.Character:FindFirstChildOfClass("Tool")
-            
-                if AutoClickerSettings.PlaceBlocks and store.blockPlacer then
-                    pcall(function()
-                        local mouse = store.blockPlacer.clientManager:getBlockSelector():getMouseInfo(0)
-                        if mouse and mouse.placementPosition then
-                            if (workspace:GetServerTimeNow() - (bedwars.BlockCpsController.lastPlaceTimestamp or 0)) >= (1 / AutoClickerSettings.BlockCPS) then
-                                local tool = lplr.Character and lplr.Character:FindFirstChildOfClass("Tool")
-                                if tool then
-                                    store.blockPlacer.blockType = tool.Name
-                                end
-                                store.blockPlacer:placeBlock(mouse.placementPosition)
-                                bedwars.BlockCpsController.lastPlaceTimestamp = workspace:GetServerTimeNow()
-                            end
-                        end
-                    end)
-                end
-
-                -- Sword clicking
-                if store.hand.toolType == "sword" and bedwars.SwordController then
-                    pcall(function()
-                        bedwars.SwordController:swingSwordAtMouse(0.39)
-                    end)
-                end
-            end
-
-            -- Breaking blocks
-            if store.hand.toolType == "breaker" and bedwars.SwordController then
-                pcall(function()
-                    bedwars.SwordController:swingSwordAtMouse(0.39)
-                end)
-            end
-
-            task.wait(1 / AutoClickerSettings.CPS)
-        end
-    end)
-end
-
-local function enableAutoClicker()
-    if AutoClickerEnabled then return end
-    
-    -- Only work with left click - exactly like the example you showed
-    local connection1 = mainInputService.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            AutoClickerEnabled = true
-            AutoClick()
-        end
-    end)
-
-    local connection2 = mainInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            AutoClickerEnabled = false
-            if AutoClickerThread then
-                task.cancel(AutoClickerThread)
-                AutoClickerThread = nil
-            end
-        end
-    end)
-
-    -- Mobile support
-    if mainInputService.TouchEnabled then
-        pcall(function()
-            local connection3 = lplr.PlayerGui.MobileUI['2'].MouseButton1Down:Connect(function()
-                AutoClickerEnabled = true
-                AutoClick()
-            end)
-            
-            local connection4 = lplr.PlayerGui.MobileUI['2'].MouseButton1Up:Connect(function()
-                AutoClickerEnabled = false
-                if AutoClickerThread then
-                    task.cancel(AutoClickerThread)
-                    AutoClickerThread = nil
-                end
-            end)
-            
-            table.insert(AutoClickerConnections, connection3)
-            table.insert(AutoClickerConnections, connection4)
-        end)
-    end
-
-    table.insert(AutoClickerConnections, connection1)
-    table.insert(AutoClickerConnections, connection2)
-end
-
-local function disableAutoClicker()
-    AutoClickerEnabled = false
-    
-    if AutoClickerThread then
-        task.cancel(AutoClickerThread)
-        AutoClickerThread = nil
-    end
-    
-    for _, connection in pairs(AutoClickerConnections) do
-        connection:Disconnect()
-    end
-    AutoClickerConnections = {}
 end
 
 local collectionService = game:GetService("CollectionService")
@@ -1068,9 +892,6 @@ local function enableAllFeatures()
     if Settings.HitFixEnabled then
         enableHitFix()
     end
-    if AutoClickerSettings.Enabled then
-        enableAutoClicker()
-    end
     allFeaturesEnabled = true
 end
 
@@ -1080,7 +901,6 @@ local function disableAllFeatures()
     disableHitboxes()
     disableSprint()
     disableHitFix()
-    disableAutoClicker()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -1129,7 +949,6 @@ end)
 
 addCleanupFunction(function()
     disableAllFeatures()
-    disableAutoClicker()
     pcall(function()
         if originalFunctions then
             for funcName, original in pairs(originalFunctions) do
