@@ -297,9 +297,9 @@ repeat task.wait() until game:IsLoaded()
 -- Settings (yo can change these values)
 local Settings = {
     ToggleKeybind = "RightShift",
-    HitBoxesMode = "Sword", -- "Sword" or "Player"
+    HitBoxesMode = "Player", -- "Sword" or "Player"
     HitBoxesExpandAmount = 14, 
-    HitFixEnabled = true, 
+    HitFixEnabled = false, 
 }
 
 local NotificationGui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
@@ -554,35 +554,65 @@ local function disableInstantPP()
     InstantPPActive = false
 end
 
--- HITFIX IMPLEMENTATION (from crazyscript)
+-- HITFIX IMPLEMENTATION - COMBINED VERSION
+
 local HitFixEnabled = Settings.HitFixEnabled
+local attackConnections = {}
 local hitfixOriginalState = nil
+local swordController = bedwars and bedwars.SwordController
+local queryUtil = bedwars and bedwars.QueryUtil or workspace
+
+local originalFunctions = {}
 
 local function setupHitFix()
-    if not bedwarsLoaded or not bedwars.SwordController or not bedwars.SwordController.swingSwordAtMouse then
-        return false
-    end
-    
-    local function applyHitFix(enabled)
-        local success = pcall(function()
-            if enabled then
-                debug.setconstant(bedwars.SwordController.swingSwordAtMouse, 23, 'raycast')
-                debug.setupvalue(bedwars.SwordController.swingSwordAtMouse, 4, bedwars.QueryUtil or workspace)
-            else
-                debug.setconstant(bedwars.SwordController.swingSwordAtMouse, 23, 'Raycast')
-                debug.setupvalue(bedwars.SwordController.swingSwordAtMouse, 4, workspace)
-            end
-        end)
-        
-        return success
-    end
-    
-    -- Store original state
-    if hitfixOriginalState == nil then
-        hitfixOriginalState = false -- Default state
-    end
-    
-    return applyHitFix(HitFixEnabled)
+	if not bedwarsLoaded or not swordController then return false end
+
+	local function applyFunctionHook(enabled)
+		if enabled then
+			local functions = {"swingSwordAtMouse", "swingSwordInRegion", "attackEntity"}
+			for _, funcName in functions do
+				local original = swordController[funcName]
+				if original and not originalFunctions[funcName] then
+					originalFunctions[funcName] = original
+					swordController[funcName] = function(self, ...)
+						local args = {...}
+						for i, arg in pairs(args) do
+							if type(arg) == "table" and arg.validate then
+								args[i].validate = nil
+							end
+						end
+						return original(self, unpack(args))
+					end
+				end
+			end
+		else
+			for funcName, original in pairs(originalFunctions) do
+				swordController[funcName] = original
+			end
+			originalFunctions = {}
+		end
+	end
+
+	local function applyDebugPatch(enabled)
+		local success = pcall(function()
+			if swordController.swingSwordAtMouse then
+				debug.setconstant(swordController.swingSwordAtMouse, 23, enabled and 'raycast' or 'Raycast')
+				debug.setupvalue(swordController.swingSwordAtMouse, 4, enabled and queryUtil or workspace)
+			end
+		end)
+		return success
+	end
+
+	-- Initialize original state
+	if hitfixOriginalState == nil then
+		hitfixOriginalState = false
+	end
+
+	-- Apply both patches
+	local hookSuccess = pcall(function() applyFunctionHook(HitFixEnabled) end)
+	local debugSuccess = applyDebugPatch(HitFixEnabled)
+
+	return hookSuccess and debugSuccess
 end
 
 local function enableHitFix()
