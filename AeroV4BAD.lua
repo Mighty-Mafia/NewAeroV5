@@ -298,7 +298,7 @@ repeat task.wait() until game:IsLoaded()
 local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Player", -- "Sword" or "Player"
-    HitBoxesExpandAmount = 14, 
+    HitBoxesExpandAmount = 15, 
     HitFixEnabled = false, 
 }
 
