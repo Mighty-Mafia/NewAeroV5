@@ -294,12 +294,12 @@ local mainTweenService = cloneref(game:GetService('TweenService'))
 
 repeat task.wait() until game:IsLoaded()
 
--- Settings (You can modify these values)
+-- Settings (yo can change these values)
 local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Sword", -- "Sword" or "Player"
-    HitBoxesExpandAmount = 8, -- Amount to expand hitboxes
-    HitFixEnabled = true, -- Whether hitfix starts enabled
+    HitBoxesExpandAmount = 14, 
+    HitFixEnabled = true, 
 }
 
 local NotificationGui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
