@@ -9,6 +9,20 @@ local run = function(func)
 	func()
 end
 
+-- Cleanup system for multiple injections
+local ScriptIdentifier = "VapeScript_" .. tostring(math.random(1000000, 9999999))
+if getgenv().VapeScriptInstances then
+    -- Clean up previous instance
+    for _, cleanup in pairs(getgenv().VapeScriptInstances) do
+        pcall(cleanup)
+    end
+end
+getgenv().VapeScriptInstances = {}
+
+local function addCleanupFunction(func)
+    table.insert(getgenv().VapeScriptInstances, func)
+end
+
 local cloneref = cloneref or function(obj)
 	return obj
 end
@@ -299,12 +313,32 @@ local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Player", -- "Sword" or "Player"
     HitBoxesExpandAmount = 15, 
-    HitFixEnabled = false, 
+    HitFixEnabled = true, 
 }
+
+local AutoClickerSettings = {
+    Enabled = true,
+    CPS = 7,
+    PlaceBlocks = true,
+    BlockCPS = 12
+}
+
+-- Clean up existing notification GUI
+pcall(function()
+    if mainPlayersService.LocalPlayer.PlayerGui:FindFirstChild("VapeNotifications") then
+        mainPlayersService.LocalPlayer.PlayerGui:FindFirstChild("VapeNotifications"):Destroy()
+    end
+end)
 
 local NotificationGui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
 NotificationGui.ResetOnSpawn = false
 NotificationGui.Name = "VapeNotifications"
+
+addCleanupFunction(function()
+    if NotificationGui and NotificationGui.Parent then
+        NotificationGui:Destroy()
+    end
+end)
 
 local function showNotification(message, duration)
     duration = duration or 3
@@ -361,7 +395,6 @@ local function waitForBedwars()
         end)
         
         if success and knit then
-            -- Wait for knit to actually start
             local startAttempts = 0
             while not debug.getupvalue(knit.Start, 1) and startAttempts < 50 do
                 startAttempts = startAttempts + 1
@@ -381,7 +414,6 @@ local function waitForBedwars()
     return nil
 end
 
--- Initialize bedwars
 local knit = waitForBedwars()
 local bedwars = {}
 
@@ -389,16 +421,28 @@ local function setupBedwars()
     if not knit then return false end
     
     local success = pcall(function()
-        -- Get client for remotes
         bedwars.Client = require(mainReplicatedStorage.TS.remotes).default.Client
         
-        -- Get sword controller
         bedwars.SwordController = knit.Controllers.SwordController
         
-        -- Get sprint controller
         bedwars.SprintController = knit.Controllers.SprintController
         
-        -- Get query util for hitfix
+        -- Add missing components for auto-clicker
+        bedwars.AppController = knit.Controllers.AppController
+        bedwars.BlockPlacementController = knit.Controllers.BlockPlacementController
+        bedwars.BlockPlacementController:startController()
+
+        repeat task.wait() until bedwars.BlockPlacementController.blockPlacer ~= nil
+
+        bedwars.BlockCpsController = knit.Controllers.BlockCpsController
+        bedwars.BlockCpsController.lastPlaceTimestamp = 0
+
+        
+        -- Add UILayers
+        bedwars.UILayers = {
+            MAIN = "MainLayer"
+        }
+        
         local queryUtilSuccess, queryUtil = pcall(function()
             return require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil
         end)
@@ -406,12 +450,12 @@ local function setupBedwars()
             bedwars.QueryUtil = queryUtil
         end
         
-        print("✅ BEDWARS COMPONENTS LOADED")
+        print("BEDWARS COMPONENTS LOADED")
         return true
     end)
     
     if not success then
-        print("❌ FAILED TO SETUP BEDWARS COMPONENTS")
+        print("FAILED TO SETUP BEDWARS COMPONENTS")
     end
     
     return success
@@ -419,10 +463,163 @@ end
 
 local bedwarsLoaded = setupBedwars()
 
+if bedwars.BlockPlacer and bedwars.BlockEngine then
+    store.blockPlacer = bedwars.BlockPlacer.new(bedwars.BlockEngine, "wool_white")
+else
+    warn("❌ BlockPlacer or BlockEngine not loaded yet.")
+end
+
 print("🔍 DEBUG - SprintController:", bedwars.SprintController and "FOUND" or "NIL")
 if bedwars.SprintController then
     print("🔍 DEBUG - startSprinting:", bedwars.SprintController.startSprinting and "FOUND" or "NIL")
     print("🔍 DEBUG - stopSprinting:", bedwars.SprintController.stopSprinting and "FOUND" or "NIL")
+end
+
+-- AUTO-CLICKER IMPLEMENTATION
+local AutoClickerEnabled = false
+local AutoClickerThread = nil
+local AutoClickerConnections = {}
+
+-- Store table to track what tool is being held
+local store = {
+    hand = {
+        toolType = "sword"
+    }
+}
+
+-- Update store.hand.toolType based on held tool
+local function updateHeldTool()
+    if not lplr.Character then 
+        store.hand.toolType = "sword"
+        return 
+    end
+    
+    local tool = lplr.Character:FindFirstChildOfClass("Tool")
+    if not tool then 
+        store.hand.toolType = "sword"
+        return 
+    end
+    
+    local toolName = tool.Name:lower()
+    if toolName:find("sword") or toolName:find("blade") or toolName:find("katana") then
+        store.hand.toolType = "sword"
+    elseif toolName:find("block") or toolName:find("wool") or toolName:find("wood") or toolName:find("stone") then
+        store.hand.toolType = "block"
+    elseif toolName:find("axe") or toolName:find("pick") then
+        store.hand.toolType = "breaker"
+    else
+        store.hand.toolType = "sword"
+    end
+    end
+
+
+local function AutoClick()
+    if AutoClickerThread then
+        task.cancel(AutoClickerThread)
+        AutoClickerThread = nil
+    end
+
+    AutoClickerThread = task.spawn(function()
+        while AutoClickerEnabled do
+            updateHeldTool()
+
+            if bedwars then
+            local tool = lplr.Character and lplr.Character:FindFirstChildOfClass("Tool")
+            
+                if AutoClickerSettings.PlaceBlocks and store.blockPlacer then
+                    pcall(function()
+                        local mouse = store.blockPlacer.clientManager:getBlockSelector():getMouseInfo(0)
+                        if mouse and mouse.placementPosition then
+                            if (workspace:GetServerTimeNow() - (bedwars.BlockCpsController.lastPlaceTimestamp or 0)) >= (1 / AutoClickerSettings.BlockCPS) then
+                                local tool = lplr.Character and lplr.Character:FindFirstChildOfClass("Tool")
+                                if tool then
+                                    store.blockPlacer.blockType = tool.Name
+                                end
+                                store.blockPlacer:placeBlock(mouse.placementPosition)
+                                bedwars.BlockCpsController.lastPlaceTimestamp = workspace:GetServerTimeNow()
+                            end
+                        end
+                    end)
+                end
+
+                -- Sword clicking
+                if store.hand.toolType == "sword" and bedwars.SwordController then
+                    pcall(function()
+                        bedwars.SwordController:swingSwordAtMouse(0.39)
+                    end)
+                end
+            end
+
+            -- Breaking blocks
+            if store.hand.toolType == "breaker" and bedwars.SwordController then
+                pcall(function()
+                    bedwars.SwordController:swingSwordAtMouse(0.39)
+                end)
+            end
+
+            task.wait(1 / AutoClickerSettings.CPS)
+        end
+    end)
+end
+
+local function enableAutoClicker()
+    if AutoClickerEnabled then return end
+    
+    -- Only work with left click - exactly like the example you showed
+    local connection1 = mainInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            AutoClickerEnabled = true
+            AutoClick()
+        end
+    end)
+
+    local connection2 = mainInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            AutoClickerEnabled = false
+            if AutoClickerThread then
+                task.cancel(AutoClickerThread)
+                AutoClickerThread = nil
+            end
+        end
+    end)
+
+    -- Mobile support
+    if mainInputService.TouchEnabled then
+        pcall(function()
+            local connection3 = lplr.PlayerGui.MobileUI['2'].MouseButton1Down:Connect(function()
+                AutoClickerEnabled = true
+                AutoClick()
+            end)
+            
+            local connection4 = lplr.PlayerGui.MobileUI['2'].MouseButton1Up:Connect(function()
+                AutoClickerEnabled = false
+                if AutoClickerThread then
+                    task.cancel(AutoClickerThread)
+                    AutoClickerThread = nil
+                end
+            end)
+            
+            table.insert(AutoClickerConnections, connection3)
+            table.insert(AutoClickerConnections, connection4)
+        end)
+    end
+
+    table.insert(AutoClickerConnections, connection1)
+    table.insert(AutoClickerConnections, connection2)
+end
+
+local function disableAutoClicker()
+    AutoClickerEnabled = false
+    
+    if AutoClickerThread then
+        task.cancel(AutoClickerThread)
+        AutoClickerThread = nil
+    end
+    
+    for _, connection in pairs(AutoClickerConnections) do
+        connection:Disconnect()
+    end
+    AutoClickerConnections = {}
 end
 
 local collectionService = game:GetService("CollectionService")
@@ -438,10 +635,27 @@ local Icons = {
     ["vitality_star"] = "rbxassetid://9866757969"
 }
 local espobjs = {}
+-- Clean up existing ESP GUI
+pcall(function()
+    for _, child in pairs(mainPlayersService.LocalPlayer.PlayerGui:GetChildren()) do
+        if child:FindFirstChild("esp_item_") then
+            child:Destroy()
+        end
+    end
+end)
+
 local espfold = Instance.new("Folder")
 local gui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
 gui.ResetOnSpawn = false
+gui.Name = "VapeESPGui"
 espfold.Parent = gui
+
+addCleanupFunction(function()
+    if gui and gui.Parent then
+        gui:Destroy()
+    end
+    resetESP()
+end)
 
 local function espadd(v, icon)
     local billboard = Instance.new("BillboardGui")
@@ -854,6 +1068,9 @@ local function enableAllFeatures()
     if Settings.HitFixEnabled then
         enableHitFix()
     end
+    if AutoClickerSettings.Enabled then
+        enableAutoClicker()
+    end
     allFeaturesEnabled = true
 end
 
@@ -863,13 +1080,14 @@ local function disableAllFeatures()
     disableHitboxes()
     disableSprint()
     disableHitFix()
+    disableAutoClicker()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
     end)
 end
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+local mainInputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
 
     if input.KeyCode == Enum.KeyCode[Settings.ToggleKeybind] then
@@ -884,7 +1102,17 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
+addCleanupFunction(function()
+    if mainInputConnection then
+        mainInputConnection:Disconnect()
+    end
+end)
+
 entitylib.start()
+
+addCleanupFunction(function()
+    entitylib.kill()
+end)
 
 if bedwarsLoaded then
     setupHitFix()
@@ -897,4 +1125,18 @@ task.spawn(function()
         statusMsg = statusMsg .. " HitFix: " .. (Settings.HitFixEnabled and "ON" or "OFF") .. ", HitBoxes: " .. Settings.HitBoxesMode
     end
     showNotification(statusMsg, 4)
+end)
+
+addCleanupFunction(function()
+    disableAllFeatures()
+    disableAutoClicker()
+    pcall(function()
+        if originalFunctions then
+            for funcName, original in pairs(originalFunctions) do
+                if swordController and swordController[funcName] then
+                    swordController[funcName] = original
+                end
+            end
+        end
+    end)
 end)
