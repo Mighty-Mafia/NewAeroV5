@@ -10,7 +10,7 @@
 local game, workspace = game, workspace
 local getrawmetatable, getmetatable, setmetatable, pcall, getgenv, next, tick = getrawmetatable, getmetatable, setmetatable, pcall, getgenv, next, tick
 local Vector2new, Vector3zero, CFramenew, Color3fromRGB, Color3fromHSV, Drawingnew, TweenInfonew = Vector2.new, Vector3.zero, CFrame.new, Color3.fromRGB, Color3.fromHSV, Drawing.new, TweenInfo.new
-local getupvalue, mousemoverel, tablefind, tableremove, stringlower, stringsub, mathclamp = debug.getupvalue, mousemoverel or (Input and Input.MouseMove), table.find, table.remove, string.lower, string.sub, math.clamp
+local getupvalue, mousemoverel, tablefind, tableremove, stringlower, stringsub, mathclamp, mathabs, mathdeg, mathatan2, mathsqrt = debug.getupvalue, mousemoverel or (Input and Input.MouseMove), table.find, table.remove, string.lower, string.sub, math.clamp, math.abs, math.deg, math.atan2, math.sqrt
 
 local GameMetatable = getrawmetatable and getrawmetatable(game) or {
 	-- Auxillary functions - if the executor doesn't support "getrawmetatable".
@@ -110,7 +110,10 @@ getgenv().ExunysDeveloperAimbot = {
 		LockPart = "Head", -- Body part to lock on
 
 		TriggerKey = Enum.UserInputType.MouseButton2,
-		Toggle = false
+		Toggle = false,
+
+		Reach = 16, -- Distance in studs for reach check
+		Angle = 100 -- Angle in degrees for angle check
 	},
 
 	FOVSettings = {
@@ -180,6 +183,29 @@ local CancelLock = function()
 	end
 end
 
+local CheckReach = function(PlayerPosition)
+	local LocalCharacter = __index(LocalPlayer, "Character")
+	if not LocalCharacter then return false end
+	
+	local LocalPrimaryPart = FindFirstChild(LocalCharacter, "HumanoidRootPart") or FindFirstChild(LocalCharacter, "Torso")
+	if not LocalPrimaryPart then return false end
+	
+	local Distance = (PlayerPosition - __index(LocalPrimaryPart, "Position")).Magnitude
+	return Distance <= Environment.Settings.Reach
+end
+
+local CheckAngle = function(PlayerPosition)
+	local CameraPosition = Camera.CFrame.Position
+	local CameraLookVector = Camera.CFrame.LookVector
+	
+	local DirectionToPlayer = (PlayerPosition - CameraPosition).Unit
+	local DotProduct = CameraLookVector:Dot(DirectionToPlayer)
+	local AngleInRadians = math.acos(mathclamp(DotProduct, -1, 1))
+	local AngleInDegrees = mathdeg(AngleInRadians)
+	
+	return AngleInDegrees <= Environment.Settings.Angle / 2
+end
+
 local GetClosestPlayer = function()
 	local Settings = Environment.Settings
 	local LockPart = Settings.LockPart
@@ -199,6 +225,14 @@ local GetClosestPlayer = function()
 				end
 
 				if Settings.AliveCheck and __index(Humanoid, "Health") <= 0 then
+					continue
+				end
+
+				if not CheckReach(PartPosition) then
+					continue
+				end
+
+				if not CheckAngle(PartPosition) then
 					continue
 				end
 
