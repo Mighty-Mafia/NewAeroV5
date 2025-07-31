@@ -9,10 +9,8 @@ local run = function(func)
 	func()
 end
 
--- Cleanup system for multiple injections
 local ScriptIdentifier = "VapeScript_" .. tostring(math.random(1000000, 9999999))
 if getgenv().VapeScriptInstances then
-    -- Clean up previous instance
     for _, cleanup in pairs(getgenv().VapeScriptInstances) do
         pcall(cleanup)
     end
@@ -34,7 +32,6 @@ local vapeEvents = setmetatable({}, {
 	end
 })
 
--- Updated entitylib based on the 687 version
 local entitylib = {
 	isAlive = false,
 	character = {},
@@ -314,9 +311,10 @@ local Settings = {
     HitBoxesMode = "Player", -- "Sword" or "Player"
     HitBoxesExpandAmount = 20, 
     HitFixEnabled = true,
+    InstantPPEnabled = true,
+    AutoChargeBowEnabled = true,
 }
 
--- Clean up existing notification GUI
 pcall(function()
     if mainPlayersService.LocalPlayer.PlayerGui:FindFirstChild("VapeNotifications") then
         mainPlayersService.LocalPlayer.PlayerGui:FindFirstChild("VapeNotifications"):Destroy()
@@ -375,7 +373,6 @@ local function showNotification(message, duration)
     notification:Destroy()
 end
 
--- Wait for bedwars to load (from crazyscript)
 local function waitForBedwars()
     local attempts = 0
     local maxAttempts = 100
@@ -420,6 +417,10 @@ local function setupBedwars()
         
         bedwars.SprintController = knit.Controllers.SprintController
         
+        bedwars.ProjectileController = knit.Controllers.ProjectileController
+        
+        bedwars.BowConstantsTable = debug.getupvalue(knit.Controllers.ProjectileController.enableBeam, 8)
+        
         local queryUtilSuccess, queryUtil = pcall(function()
             return require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil
         end)
@@ -439,6 +440,8 @@ local function setupBedwars()
 end
 
 local bedwarsLoaded = setupBedwars()
+local AutoChargeBowEnabled = Settings.AutoChargeBowEnabled
+local oldCalculateImportantLaunchValues = nil
 
 print("🔍 DEBUG - SprintController:", bedwars.SprintController and "FOUND" or "NIL")
 if bedwars.SprintController then
@@ -459,7 +462,6 @@ local Icons = {
     ["vitality_star"] = "rbxassetid://9866757969"
 }
 local espobjs = {}
--- Clean up existing ESP GUI
 pcall(function()
     for _, child in pairs(mainPlayersService.LocalPlayer.PlayerGui:GetChildren()) do
         if child:FindFirstChild("esp_item_") then
@@ -574,7 +576,7 @@ local InstantPPConnection = nil
 local InstantPPActive = false
 
 local function enableInstantPP()
-    if InstantPPActive then return end
+    if InstantPPActive or not Settings.InstantPPEnabled then return end
     if fireproximityprompt then
         InstantPPConnection = ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
             fireproximityprompt(prompt)
@@ -591,8 +593,6 @@ local function disableInstantPP()
     end
     InstantPPActive = false
 end
-
--- HITFIX IMPLEMENTATION - COMBINED VERSION
 
 local HitFixEnabled = Settings.HitFixEnabled
 local attackConnections = {}
@@ -641,12 +641,10 @@ local function setupHitFix()
 		return success
 	end
 
-	-- Initialize original state
 	if hitfixOriginalState == nil then
 		hitfixOriginalState = false
 	end
 
-	-- Apply both patches
 	local hookSuccess = pcall(function() applyFunctionHook(HitFixEnabled) end)
 	local debugSuccess = applyDebugPatch(HitFixEnabled)
 
@@ -665,7 +663,68 @@ local function disableHitFix()
     return setupHitFix()
 end
 
--- IMPROVED HITBOXES SYSTEM (from crazyscript)
+local function enableAutoChargeBow()
+    if not bedwarsLoaded or not bedwars.ProjectileController then return false end
+    
+    local success = pcall(function()
+        if not oldCalculateImportantLaunchValues then
+            oldCalculateImportantLaunchValues = bedwars.ProjectileController.calculateImportantLaunchValues
+        end
+        
+        bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
+            local self, projmeta, worldmeta, origin, shootpos = ...
+            
+            if projmeta.projectile:find('arrow') then
+                local pos = shootpos or self:getLaunchPosition(origin)
+                if not pos then
+                    return oldCalculateImportantLaunchValues(...)
+                end
+                
+                local meta = projmeta:getProjectileMeta()
+                local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
+                local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
+                local projSpeed = (meta.launchVelocity or 100)
+                local offsetpos = pos + (projmeta.projectile == 'owl_projectile' and Vector3.zero or projmeta.fromPositionOffset)
+                
+                local camera = workspace.CurrentCamera
+                local mouse = lplr:GetMouse()
+                local unitRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
+                
+                local targetPoint = unitRay.Origin + (unitRay.Direction * 1000)
+                local aimDirection = (targetPoint - offsetpos).Unit
+                
+                local newlook = CFrame.new(offsetpos, targetPoint) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
+                local finalDirection = (targetPoint - newlook.Position).Unit
+                
+                return {
+                    initialVelocity = finalDirection * projSpeed,
+                    positionFrom = offsetpos,
+                    deltaT = lifetime,
+                    gravitationalAcceleration = gravity,
+                    drawDurationSeconds = 5
+                }
+            end
+            
+            return oldCalculateImportantLaunchValues(...)
+        end
+        
+        AutoChargeBowEnabled = true
+    end)
+    
+    return success
+end
+
+local function disableAutoChargeBow()
+    if not bedwarsLoaded or not bedwars.ProjectileController or not oldCalculateImportantLaunchValues then return false end
+    
+    local success = pcall(function()
+        bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
+        AutoChargeBowEnabled = false
+    end)
+    
+    return success
+end
+
 local hitboxParts = {}
 local swordHitboxEnabled = false
 local hitboxConnections = {}
@@ -701,22 +760,19 @@ local function setupHitBoxes()
             local char = player.Character
             local hrp = char.HumanoidRootPart
             
-            -- Remove old hitbox if exists
             if hitboxParts[player] then
                 hitboxParts[player]:Destroy()
             end
             
-            -- Create new hitbox
             local hitbox = Instance.new("Part")
             hitbox.Name = "CustomHitBox"
             hitbox.Size = Vector3.new(Settings.HitBoxesExpandAmount, Settings.HitBoxesExpandAmount, Settings.HitBoxesExpandAmount)
             hitbox.Position = hrp.Position
             hitbox.CanCollide = false
             hitbox.Massless = true
-            hitbox.Transparency = 1 -- Invisible hitboxes
+            hitbox.Transparency = 1 
             hitbox.Parent = char
             
-            -- Weld to player
             local weld = Instance.new("WeldConstraint")
             weld.Part0 = hitbox
             weld.Part1 = hrp
@@ -739,25 +795,22 @@ local function setupHitBoxes()
     
     local function applyPlayerHitBoxes(enabled)
         if enabled then
-            -- Create hitboxes for all players
             for _, player in pairs(playersService:GetPlayers()) do
                 if player ~= lplr then
                     createPlayerHitBox(player)
                 end
             end
             
-            -- Connect to new players
             local newPlayerConnection = playersService.PlayerAdded:Connect(function(player)
                 if player ~= lplr then
                     player.CharacterAdded:Connect(function()
-                        task.wait(1) -- Wait for character to fully load
+                        task.wait(1) 
                         createPlayerHitBox(player)
                     end)
                 end
             end)
             table.insert(hitboxConnections, newPlayerConnection)
             
-            -- Connect to character respawns
             for _, player in pairs(playersService:GetPlayers()) do
                 if player ~= lplr then
                     local charConnection = player.CharacterAdded:Connect(function()
@@ -886,11 +939,16 @@ local allFeaturesEnabled = true
 
 local function enableAllFeatures()
     recreateESP()
-    enableInstantPP()
+    if Settings.InstantPPEnabled then
+        enableInstantPP()
+    end
     enableHitboxes()
     enableSprint()
     if Settings.HitFixEnabled then
         enableHitFix()
+    end
+    if Settings.AutoChargeBowEnabled then
+        enableAutoChargeBow()
     end
     allFeaturesEnabled = true
 end
@@ -901,6 +959,7 @@ local function disableAllFeatures()
     disableHitboxes()
     disableSprint()
     disableHitFix()
+    disableAutoChargeBow()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -956,6 +1015,9 @@ addCleanupFunction(function()
                     swordController[funcName] = original
                 end
             end
+        end
+        if oldCalculateImportantLaunchValues and bedwars.ProjectileController then
+            bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
         end
     end)
 end)
