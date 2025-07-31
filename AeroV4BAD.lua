@@ -312,8 +312,8 @@ repeat task.wait() until game:IsLoaded()
 local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Player", -- "Sword" or "Player"
-    HitBoxesExpandAmount = 15, 
-    HitFixEnabled = true, 
+    HitBoxesExpandAmount = 14, 
+    HitFixEnabled = false, 
 }
 
 -- Clean up existing notification GUI
