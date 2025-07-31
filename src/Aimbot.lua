@@ -107,12 +107,10 @@ getgenv().ExunysDeveloperAimbot = {
 		Sensitivity2 = 3.5, -- mousemoverel Sensitivity
 
 		LockMode = 1, -- 1 = CFrame; 2 = mousemoverel
-		LockPart = "Head", -- Body part to lock on
+		LockPart = "Torso", -- Body part to lock on
 
 		TriggerKey = Enum.UserInputType.MouseButton2,
-		Toggle = false,
-
-		Reach = 16 -- Distance in studs for reach check
+		Toggle = false
 	},
 
 	FOVSettings = {
@@ -182,19 +180,6 @@ local CancelLock = function()
 	end
 end
 
-local CheckReach = function(PlayerPosition)
-	local LocalCharacter = __index(LocalPlayer, "Character")
-	if not LocalCharacter then return false end
-	
-	local LocalPrimaryPart = FindFirstChild(LocalCharacter, "HumanoidRootPart") or FindFirstChild(LocalCharacter, "Torso")
-	if not LocalPrimaryPart then return false end
-	
-	local Distance = (PlayerPosition - __index(LocalPrimaryPart, "Position")).Magnitude
-	return Distance <= Environment.Settings.Reach
-end
-
-
-
 local GetClosestPlayer = function()
 	local Settings = Environment.Settings
 	local LockPart = Settings.LockPart
@@ -214,10 +199,6 @@ local GetClosestPlayer = function()
 				end
 
 				if Settings.AliveCheck and __index(Humanoid, "Health") <= 0 then
-					continue
-				end
-
-				if not CheckReach(PartPosition) then
 					continue
 				end
 
