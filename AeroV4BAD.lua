@@ -308,11 +308,11 @@ repeat task.wait() until game:IsLoaded()
 -- Settings (yo can change these values)
 local Settings = {
     ToggleKeybind = "RightShift",
-    HitBoxesMode = "Player", -- "Sword" or "Player"
-    HitBoxesExpandAmount = 25, 
+    HitBoxesMode = "Sword", -- "Sword" or "Player"
+    HitBoxesExpandAmount = 30, 
     HitFixEnabled = true,
     InstantPPEnabled = true,
-    AutoChargeBowEnabled = true,
+    AutoChargeBowEnabled = false,
 }
 
 pcall(function()
