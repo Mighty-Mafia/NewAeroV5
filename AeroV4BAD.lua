@@ -325,52 +325,119 @@ local NotificationGui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer
 NotificationGui.ResetOnSpawn = false
 NotificationGui.Name = "VapeNotifications"
 
+local currentNotification = nil
+
 addCleanupFunction(function()
     if NotificationGui and NotificationGui.Parent then
         NotificationGui:Destroy()
     end
+    currentNotification = nil
 end)
 
 local function showNotification(message, duration)
     duration = duration or 3
     
+    if currentNotification and currentNotification.Parent then
+        currentNotification:Destroy()
+        currentNotification = nil
+    end
+    
     local notification = Instance.new("Frame")
-    notification.Size = UDim2.new(0, 350, 0, 60)
-    notification.Position = UDim2.new(0.5, -175, 0, 20)
-    notification.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    notification.Size = UDim2.new(0, 380, 0, 70)
+    notification.Position = UDim2.new(0.5, -190, 0, 25)
+    notification.BackgroundColor3 = Color3.fromRGB(20, 22, 25)
     notification.BorderSizePixel = 0
     notification.AnchorPoint = Vector2.new(0.5, 0)
     notification.Parent = NotificationGui
+    
+    currentNotification = notification
 
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
+    corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = notification
 
     local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(100, 100, 100)
-    stroke.Thickness = 1
+    stroke.Color = Color3.fromRGB(70, 130, 255)
+    stroke.Thickness = 2
     stroke.Parent = notification
+    
+    local gradient = Instance.new("UIGradient")
+    gradient.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 27, 30)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 17, 20))
+    }
+    gradient.Rotation = 45
+    gradient.Parent = notification
+
+    local shadow = Instance.new("Frame")
+    shadow.Size = UDim2.new(1, 10, 1, 10)
+    shadow.Position = UDim2.new(0, -5, 0, -5)
+    shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    shadow.BackgroundTransparency = 0.3
+    shadow.ZIndex = notification.ZIndex - 1
+    shadow.Parent = notification
+    
+    local shadowCorner = Instance.new("UICorner")
+    shadowCorner.CornerRadius = UDim.new(0, 12)
+    shadowCorner.Parent = shadow
+
+    local iconFrame = Instance.new("Frame")
+    iconFrame.Size = UDim2.new(0, 50, 1, -10)
+    iconFrame.Position = UDim2.new(0, 5, 0, 5)
+    iconFrame.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+    iconFrame.BackgroundTransparency = 0.1
+    iconFrame.Parent = notification
+    
+    local iconCorner = Instance.new("UICorner")
+    iconCorner.CornerRadius = UDim.new(0, 8)
+    iconCorner.Parent = iconFrame
+    
+    local iconLabel = Instance.new("TextLabel")
+    iconLabel.Size = UDim2.new(1, 0, 1, 0)
+    iconLabel.BackgroundTransparency = 1
+    iconLabel.Text = "✓"
+    iconLabel.TextColor3 = Color3.new(1, 1, 1)
+    iconLabel.Font = Enum.Font.GothamBold
+    iconLabel.TextSize = 24
+    iconLabel.Parent = iconFrame
 
     local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1, -20, 1, 0)
-    textLabel.Position = UDim2.new(0, 10, 0, 0)
+    textLabel.Size = UDim2.new(1, -70, 1, -10)
+    textLabel.Position = UDim2.new(0, 60, 0, 5)
     textLabel.BackgroundTransparency = 1
     textLabel.TextColor3 = Color3.new(1, 1, 1)
     textLabel.Font = Enum.Font.GothamSemibold
-    textLabel.TextSize = 16
+    textLabel.TextSize = 14
     textLabel.Text = message
     textLabel.TextXAlignment = Enum.TextXAlignment.Left
+    textLabel.TextYAlignment = Enum.TextYAlignment.Center
     textLabel.TextWrapped = true
     textLabel.Parent = notification
 
-    notification.Position = UDim2.new(0.5, -175, 0, -70)
-    notification:TweenPosition(UDim2.new(0.5, -175, 0, 20), "Out", "Quad", 0.3, true)
-
-    task.wait(duration)
+    notification.Position = UDim2.new(0.5, -190, 0, -80)
+    local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    local tween = mainTweenService:Create(notification, tweenInfo, {Position = UDim2.new(0.5, -190, 0, 25)})
+    tween:Play()
     
-    notification:TweenPosition(UDim2.new(0.5, -175, 0, -70), "In", "Quad", 0.3, true)
-    task.wait(0.3)
-    notification:Destroy()
+    task.spawn(function()
+        task.wait(duration)
+        
+        if currentNotification == notification then
+            local outTweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            local outTween = mainTweenService:Create(notification, outTweenInfo, {Position = UDim2.new(0.5, -190, 0, -80)})
+            outTween:Play()
+            
+            outTween.Completed:Wait()
+            
+            if notification and notification.Parent then
+                notification:Destroy()
+            end
+            
+            if currentNotification == notification then
+                currentNotification = nil
+            end
+        end
+    end)
 end
 
 local function waitForBedwars()
@@ -406,6 +473,11 @@ end
 
 local knit = waitForBedwars()
 local bedwars = {}
+local remotes = {}
+local store = {
+    attackReach = 0,
+    attackReachUpdate = tick()
+}
 
 local function setupBedwars()
     if not knit then return false end
@@ -418,17 +490,62 @@ local function setupBedwars()
         bedwars.SprintController = knit.Controllers.SprintController
         
         bedwars.ProjectileController = knit.Controllers.ProjectileController
+
+        bedwars.QueryUtil = require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil or workspace
         
         bedwars.BowConstantsTable = debug.getupvalue(knit.Controllers.ProjectileController.enableBeam, 8)
         
-        local queryUtilSuccess, queryUtil = pcall(function()
-            return require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil
+        
+        pcall(function()
+            bedwars.QueryUtil = require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil
         end)
-        if queryUtilSuccess then
-            bedwars.QueryUtil = queryUtil
+        
+        local combatConstantSuccess = pcall(function()
+            bedwars.CombatConstant = require(mainReplicatedStorage.TS.combat['combat-constant']).CombatConstant
+        end)
+        
+        if combatConstantSuccess and bedwars.Client then
+            pcall(function()
+                local remoteNames = {
+                    AttackEntity = bedwars.SwordController.sendServerRequest
+                }
+                
+                local function dumpRemote(tab)
+                    local ind
+                    for i, v in tab do
+                        if v == 'Client' then
+                            ind = i
+                            break
+                        end
+                    end
+                    return ind and tab[ind + 1] or ''
+                end
+                
+                remotes = remotes or {}
+                for i, v in remoteNames do
+                    local remote = dumpRemote(debug.getconstants(v))
+                    if remote ~= '' then
+                        remotes[i] = remote
+                        print(" DEBUG - Remote found:", i, "->", remote)
+                    else
+                        print("DEBUG - Failed to find remote:", i)
+                    end
+                end
+            end)
+        end
+
+        if combatConstantSuccess and bedwars.Client then
+            pcall(function()
+                bedwars.AttackEntityRemote = bedwars.Client:Get("AttackEntity")
+            end)
         end
         
-        print("BEDWARS COMPONENTS LOADED")
+        print(" DEBUG - CombatConstant loaded:", combatConstantSuccess)
+        if combatConstantSuccess then
+            print(" DEBUG - Original reach distance:", bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE)
+        end
+        
+        print("BEDWARS COMPONENTS LOADED - CombatConstant:", combatConstantSuccess and "SUCCESS" or "FAILED")
         return true
     end)
     
@@ -442,12 +559,6 @@ end
 local bedwarsLoaded = setupBedwars()
 local AutoChargeBowEnabled = Settings.AutoChargeBowEnabled
 local oldCalculateImportantLaunchValues = nil
-
-print("🔍 DEBUG - SprintController:", bedwars.SprintController and "FOUND" or "NIL")
-if bedwars.SprintController then
-    print("🔍 DEBUG - startSprinting:", bedwars.SprintController.startSprinting and "FOUND" or "NIL")
-    print("🔍 DEBUG - stopSprinting:", bedwars.SprintController.stopSprinting and "FOUND" or "NIL")
-end
 
 local collectionService = game:GetService("CollectionService")
 local debris = game:GetService("Debris")
@@ -598,69 +709,133 @@ local HitFixEnabled = Settings.HitFixEnabled
 local attackConnections = {}
 local hitfixOriginalState = nil
 local swordController = bedwars and bedwars.SwordController
-local queryUtil = bedwars and bedwars.QueryUtil or workspace
+local queryUtil = nil
 
 local originalFunctions = {}
+local OldGet = nil
+
+local function hookClientGet()
+    if not bedwars.Client or OldGet then return end
+    
+    OldGet = bedwars.Client.Get
+    bedwars.Client.Get = function(self, remoteName)
+        local call = OldGet(self, remoteName)
+        
+        if remoteName == (remotes and remotes.AttackEntity or "AttackEntity") then
+            return {
+                instance = call.instance,
+                SendToServer = function(_, attackTable, ...)
+                    if attackTable and attackTable.validate then
+                        local selfpos = attackTable.validate.selfPosition and attackTable.validate.selfPosition.value
+                        local targetpos = attackTable.validate.targetPosition and attackTable.validate.targetPosition.value
+                        
+                        if selfpos and targetpos then
+                            store.attackReach = ((selfpos - targetpos).Magnitude * 100) // 1 / 100
+                            store.attackReachUpdate = tick() + 1
+                            
+                            if HitFixEnabled then
+                                attackTable.validate.raycast = attackTable.validate.raycast or {}
+                                attackTable.validate.selfPosition.value = selfpos + CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
+                            end
+                        end
+                    end
+                    return call:SendToServer(attackTable, ...)
+                end
+            }
+        end
+        
+        return call
+    end
+end
+
+local originalReachDistance = nil
+local REACH_DISTANCE = 18
+local remotes = {}
 
 local function setupHitFix()
-	if not bedwarsLoaded or not swordController then return false end
+    if not bedwarsLoaded or not swordController then return false end
 
-	local function applyFunctionHook(enabled)
-		if enabled then
-			local functions = {"swingSwordAtMouse", "swingSwordInRegion", "attackEntity"}
-			for _, funcName in functions do
-				local original = swordController[funcName]
-				if original and not originalFunctions[funcName] then
-					originalFunctions[funcName] = original
-					swordController[funcName] = function(self, ...)
-						local args = {...}
-						for i, arg in pairs(args) do
-							if type(arg) == "table" and arg.validate then
-								args[i].validate = nil
-							end
-						end
-						return original(self, unpack(args))
-					end
-				end
-			end
-		else
-			for funcName, original in pairs(originalFunctions) do
-				swordController[funcName] = original
-			end
-			originalFunctions = {}
-		end
-	end
+    local function applyFunctionHook(enabled)
+        if enabled then
+            local functions = {"swingSwordAtMouse", "swingSwordInRegion", "attackEntity"}
+            for _, funcName in functions do
+                local original = swordController[funcName]
+                if original and not originalFunctions[funcName] then
+                    originalFunctions[funcName] = original
+                    swordController[funcName] = function(self, ...)
+                        local args = {...}
+                        for i, arg in pairs(args) do
+                            if type(arg) == "table" and arg.validate then
+                                args[i].validate = nil
+                            end
+                        end
+                        return original(self, unpack(args))
+                    end
+                end
+            end
+        else
+            for funcName, original in pairs(originalFunctions) do
+                swordController[funcName] = original
+            end
+            originalFunctions = {}
+        end
+    end
 
-	local function applyDebugPatch(enabled)
-		local success = pcall(function()
-			if swordController.swingSwordAtMouse then
-				debug.setconstant(swordController.swingSwordAtMouse, 23, enabled and 'raycast' or 'Raycast')
-				debug.setupvalue(swordController.swingSwordAtMouse, 4, enabled and queryUtil or workspace)
-			end
-		end)
-		return success
-	end
+    local function applyDebugPatch(enabled)
+        local success = pcall(function()
+            if swordController and swordController.swingSwordAtMouse then
+                debug.setconstant(swordController.swingSwordAtMouse, 23, enabled and 'raycast' or 'Raycast')
+                debug.setupvalue(swordController.swingSwordAtMouse, 4, enabled and bedwars.QueryUtil or workspace)
+            end
+        end)
+        return success
+    end
 
-	if hitfixOriginalState == nil then
-		hitfixOriginalState = false
-	end
+    local function applyReach(enabled)
+        local success = pcall(function()
+            if bedwars and bedwars.CombatConstant then
+                if enabled then
+                    if originalReachDistance == nil then
+                        originalReachDistance = bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE
+                    end
+                    bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = 18 + 2
+                else
+                    if originalReachDistance ~= nil then
+                        bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = originalReachDistance
+                    end
+                end
+                return true
+            end
+            return false
+        end)
+        return success
+    end
 
-	local hookSuccess = pcall(function() applyFunctionHook(HitFixEnabled) end)
-	local debugSuccess = applyDebugPatch(HitFixEnabled)
+    if hitfixOriginalState == nil then
+        hitfixOriginalState = false
+    end
 
-	return hookSuccess and debugSuccess
+    hookClientGet()
+    local hookSuccess = pcall(function() applyFunctionHook(HitFixEnabled) end)
+    local debugSuccess = applyDebugPatch(HitFixEnabled)
+    local reachSuccess = applyReach(HitFixEnabled)
+
+
+    return hookSuccess and reachSuccess
 end
 
 local function enableHitFix()
     if not bedwarsLoaded then return false end
     HitFixEnabled = true
-    return setupHitFix()
+    local success = setupHitFix()
+    return success
 end
 
 local function disableHitFix()
     if not bedwarsLoaded then return false end
     HitFixEnabled = false
-    return setupHitFix()
+    local success = setupHitFix()
+    return success
 end
 
 local function enableAutoChargeBow()
@@ -1018,6 +1193,12 @@ addCleanupFunction(function()
         end
         if oldCalculateImportantLaunchValues and bedwars.ProjectileController then
             bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
+        end
+        if originalReachDistance ~= nil and bedwars and bedwars.CombatConstant then
+            bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = originalReachDistance
+        end
+        if OldGet and bedwars.Client then
+            bedwars.Client.Get = OldGet
         end
     end)
 end)
