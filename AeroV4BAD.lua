@@ -313,6 +313,7 @@ local Settings = {
     HitFixEnabled = true,
     InstantPPEnabled = true,
     AutoChargeBowEnabled = false,
+    AutoToolEnabled = true,
 }
 
 pcall(function()
@@ -476,8 +477,65 @@ local bedwars = {}
 local remotes = {}
 local store = {
     attackReach = 0,
-    attackReachUpdate = tick()
+    attackReachUpdate = tick(),
+    inventory = {
+        inventory = {
+            items = {},
+            armor = {}
+        },
+        hotbar = {}
+    },
+    tools = {}
 }
+
+local function getItem(itemName, inv)
+    for slot, item in (inv or store.inventory.inventory.items) do
+        if item.itemType == itemName then
+            return item, slot
+        end
+    end
+    return nil
+end
+
+local function getSword()
+    local bestSword, bestSwordSlot, bestSwordDamage = nil, nil, 0
+    for slot, item in store.inventory.inventory.items do
+        local swordMeta = bedwars.ItemMeta[item.itemType].sword
+        if swordMeta then
+            local swordDamage = swordMeta.damage or 0
+            if swordDamage > bestSwordDamage then
+                bestSword, bestSwordSlot, bestSwordDamage = item, slot, swordDamage
+            end
+        end
+    end
+    return bestSword, bestSwordSlot
+end
+
+local function getTool(breakType)
+    local bestTool, bestToolSlot, bestToolDamage = nil, nil, 0
+    for slot, item in store.inventory.inventory.items do
+        local toolMeta = bedwars.ItemMeta[item.itemType].breakBlock
+        if toolMeta then
+            local toolDamage = toolMeta[breakType] or 0
+            if toolDamage > bestToolDamage then
+                bestTool, bestToolSlot, bestToolDamage = item, slot, toolDamage
+            end
+        end
+    end
+    return bestTool, bestToolSlot
+end
+
+local function hotbarSwitch(slot)
+    if slot and store.inventory.hotbarSlot ~= slot then
+        bedwars.Store:dispatch({
+            type = 'InventorySelectHotbarSlot',
+            slot = slot
+        })
+        vapeEvents.InventoryChanged.Event:Wait()
+        return true
+    end
+    return false
+end
 
 local function setupBedwars()
     if not knit then return false end
@@ -495,6 +553,11 @@ local function setupBedwars()
         
         bedwars.BowConstantsTable = debug.getupvalue(knit.Controllers.ProjectileController.enableBeam, 8)
         
+        bedwars.ItemMeta = debug.getupvalue(require(mainReplicatedStorage.TS.item['item-meta']).getItemMeta, 1)
+        
+        bedwars.Store = require(lplr.PlayerScripts.TS.ui.store).ClientStore
+        
+        bedwars.BlockBreaker = knit.Controllers.BlockBreakController.blockBreaker
         
         pcall(function()
             bedwars.QueryUtil = require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil
@@ -546,6 +609,37 @@ local function setupBedwars()
         end
         
         print("BEDWARS COMPONENTS LOADED - CombatConstant:", combatConstantSuccess and "SUCCESS" or "FAILED")
+
+        pcall(function()
+            local function updateStore(new, old)
+                if new.Inventory ~= old.Inventory then
+                    local newinv = (new.Inventory and new.Inventory.observedInventory or {inventory = {}})
+                    local oldinv = (old.Inventory and old.Inventory.observedInventory or {inventory = {}})
+                    store.inventory = newinv
+
+                    if newinv ~= oldinv then
+                        vapeEvents.InventoryChanged:Fire()
+                    end
+
+                    if newinv.inventory.items ~= oldinv.inventory.items then
+                        vapeEvents.InventoryAmountChanged:Fire()
+                        store.tools.sword = getSword()
+                        for _, v in {'stone', 'wood', 'wool'} do
+                            store.tools[v] = getTool(v)
+                        end
+                    end
+                end
+            end
+
+            local storeChanged = bedwars.Store.changed:connect(updateStore)
+            updateStore(bedwars.Store:getState(), {})
+            
+            addCleanupFunction(function()
+                if storeChanged then
+                    storeChanged:disconnect()
+                end
+            end)
+        end)
         return true
     end)
     
@@ -735,7 +829,7 @@ local function hookClientGet()
                             
                             if HitFixEnabled then
                                 attackTable.validate.raycast = attackTable.validate.raycast or {}
-                                attackTable.validate.selfPosition.value = selfpos + CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
+                                attackTable.validate.selfPosition.value += CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
                             end
                         end
                     end
@@ -1109,6 +1203,71 @@ local function disableSprint()
     SprintEnabled = false
 end
 
+local AutoToolEnabled = false
+local autoToolConnections = {}
+local oldHitBlock = nil
+
+local function switchHotbarItem(block)
+    if not Settings.AutoToolEnabled or not bedwarsLoaded then return false end
+    
+    if block and not block:GetAttribute('NoBreak') and not block:GetAttribute('Team'..(lplr:GetAttribute('Team') or 0)..'NoBreak') then
+        local blockMeta = bedwars.ItemMeta[block.Name]
+        if not blockMeta or not blockMeta.block then return false end
+        
+        local tool, slot = store.tools[blockMeta.block.breakType], nil
+        if tool then
+            for i, v in store.inventory.hotbar do
+                if v.item and v.item.itemType == tool.itemType then 
+                    slot = i - 1 
+                    break 
+                end
+            end
+
+            if hotbarSwitch(slot) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function enableAutoTool()
+    if AutoToolEnabled or not bedwarsLoaded or not bedwars.BlockBreaker then return false end
+    
+    local success = pcall(function()
+        oldHitBlock = bedwars.BlockBreaker.hitBlock
+        bedwars.BlockBreaker.hitBlock = function(self, maid, raycastparams, ...)
+            local block = self.clientManager:getBlockSelector():getMouseInfo(1, {ray = raycastparams})
+            if switchHotbarItem(block and block.target and block.target.blockInstance or nil) then 
+                return 
+            end
+            return oldHitBlock(self, maid, raycastparams, ...)
+        end
+        AutoToolEnabled = true
+    end)
+    
+    return success
+end
+
+local function disableAutoTool()
+    if not AutoToolEnabled or not bedwarsLoaded or not bedwars.BlockBreaker then return false end
+    
+    local success = pcall(function()
+        if oldHitBlock then
+            bedwars.BlockBreaker.hitBlock = oldHitBlock
+            oldHitBlock = nil
+        end
+        AutoToolEnabled = false
+    end)
+    
+    for _, conn in pairs(autoToolConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    autoToolConnections = {}
+    
+    return success
+end
+
 local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
 
@@ -1125,6 +1284,9 @@ local function enableAllFeatures()
     if Settings.AutoChargeBowEnabled then
         enableAutoChargeBow()
     end
+    if Settings.AutoToolEnabled then
+        enableAutoTool()
+    end
     allFeaturesEnabled = true
 end
 
@@ -1135,6 +1297,7 @@ local function disableAllFeatures()
     disableSprint()
     disableHitFix()
     disableAutoChargeBow()
+    disableAutoTool()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -1199,6 +1362,9 @@ addCleanupFunction(function()
         end
         if OldGet and bedwars.Client then
             bedwars.Client.Get = OldGet
+        end
+        if oldHitBlock and bedwars.BlockBreaker then
+            bedwars.BlockBreaker.hitBlock = oldHitBlock
         end
     end)
 end)
