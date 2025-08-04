@@ -308,7 +308,7 @@ repeat task.wait() until game:IsLoaded()
 -- Settings (yo can change these values)
 local Settings = {
     ToggleKeybind = "RightShift",
-    HitBoxesMode = "Sword", -- "Sword" or "Player"
+    HitBoxesMode = "Player", -- "Sword" or "Player"
     HitBoxesExpandAmount = 30, 
     HitFixEnabled = true,
     InstantPPEnabled = true,
@@ -502,6 +502,8 @@ local remotes = {}
 local store = {
     attackReach = 0,
     attackReachUpdate = tick(),
+    damageBlockFail = tick(),
+    hand = {},
     inventory = {
         inventory = {
             items = {},
@@ -509,8 +511,13 @@ local store = {
         },
         hotbar = {}
     },
+    inventories = {},
+    matchState = 0,
+    queueType = 'bedwars_test',
     tools = {}
 }
+local Reach = {}
+local HitBoxes = {}
 
 local function getItem(itemName, inv)
     for slot, item in (inv or store.inventory.inventory.items) do
@@ -578,6 +585,8 @@ local function entityPosition(options)
     local localPos = entitylib.character.RootPart.Position
     local entityCount = 0
     local targetableCount = 0
+    local closest = nil
+    local closestDistance = range
     
     for _, entity in pairs(entitylib.List) do
         entityCount = entityCount + 1
@@ -586,21 +595,23 @@ local function entityPosition(options)
             local distance = (localPos - entity[part].Position).Magnitude
             debugPrint(string.format("Found entity at distance: %.2f (range: %d)", distance, range), "ENTITY")
             
-            if distance <= range then
+            if distance <= closestDistance then
                 if players and entity.Player then
-                    debugPrint(string.format("entityPosition() found player target: %s", entity.Player.Name), "ENTITY")
-                    return entity
+                    closest = entity
+                    closestDistance = distance
+                    debugPrint(string.format("entityPosition() found closer player target: %s at %.2f", entity.Player.Name, distance), "ENTITY")
                 elseif not players then
-                    debugPrint("entityPosition() found non-player target", "ENTITY")
-                    return entity
+                    closest = entity
+                    closestDistance = distance
+                    debugPrint("entityPosition() found closer non-player target", "ENTITY")
                 end
             end
         end
     end
     
-    debugPrint(string.format("entityPosition() no targets found - Total entities: %d, Targetable: %d", 
-        entityCount, targetableCount), "ENTITY")
-    return nil
+    debugPrint(string.format("entityPosition() result - Total entities: %d, Targetable: %d, Found: %s", 
+        entityCount, targetableCount, closest and "YES" or "NO"), "ENTITY")
+    return closest
 end
 
 local function setupBedwars()
@@ -610,31 +621,54 @@ local function setupBedwars()
         bedwars.Client = require(mainReplicatedStorage.TS.remotes).default.Client
         
         bedwars.SwordController = knit.Controllers.SwordController
+        debugPrint("SwordController loaded: " .. tostring(bedwars.SwordController ~= nil), "DEBUG")
+        if bedwars.SwordController and bedwars.SwordController.swingSwordInRegion then
+            debugPrint("swingSwordInRegion function found", "DEBUG")
+        else
+            debugPrint("swingSwordInRegion function NOT found", "ERROR")
+        end
         
         bedwars.SprintController = knit.Controllers.SprintController
-        
         bedwars.ProjectileController = knit.Controllers.ProjectileController
-
         bedwars.QueryUtil = require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil or workspace
-        
         bedwars.BowConstantsTable = debug.getupvalue(knit.Controllers.ProjectileController.enableBeam, 8)
-        
         bedwars.ItemMeta = debug.getupvalue(require(mainReplicatedStorage.TS.item['item-meta']).getItemMeta, 1)
-        
         bedwars.Store = require(lplr.PlayerScripts.TS.ui.store).ClientStore
-        
         bedwars.BlockBreaker = knit.Controllers.BlockBreakController.blockBreaker
-        
         bedwars.KnockbackUtil = require(mainReplicatedStorage.TS.damage['knockback-util']).KnockbackUtil
+        
         debugPrint("bedwars.KnockbackUtil loaded successfully", "SUCCESS")
         
-        pcall(function()
-            bedwars.QueryUtil = require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil
-        end)
+        local combatConstantSuccess = false
+        local combatConstantPaths = {
+            function() return require(mainReplicatedStorage.TS.combat['combat-constant']).CombatConstant end,
+            function() return require(mainReplicatedStorage.TS.combat.CombatConstant) end,
+            function() return knit.Controllers.SwordController.CombatConstant end
+        }
         
-        local combatConstantSuccess = pcall(function()
-            bedwars.CombatConstant = require(mainReplicatedStorage.TS.combat['combat-constant']).CombatConstant
-        end)
+        for i, pathFunc in ipairs(combatConstantPaths) do
+            local success = pcall(function()
+                bedwars.CombatConstant = pathFunc()
+                if bedwars.CombatConstant and bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE then
+                    combatConstantSuccess = true
+                    debugPrint(string.format("CombatConstant loaded via path %d, reach distance: %s", i, tostring(bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE)), "DEBUG")
+                end
+            end)
+            if combatConstantSuccess then break end
+        end
+        
+        if not combatConstantSuccess then
+            debugPrint("All CombatConstant paths failed, trying direct constant modification", "DEBUG")
+            pcall(function()
+                local constants = debug.getconstants(bedwars.SwordController.swingSwordInRegion)
+                for i, v in pairs(constants) do
+                    if v == 3.8 then
+                        debugPrint("Found sword range constant at index " .. i, "DEBUG")
+                        break
+                    end
+                end
+            end)
+        end
         
         if combatConstantSuccess and bedwars.Client then
             pcall(function()
@@ -658,9 +692,9 @@ local function setupBedwars()
                     local remote = dumpRemote(debug.getconstants(v))
                     if remote ~= '' then
                         remotes[i] = remote
-                        print(" DEBUG - Remote found:", i, "->", remote)
+                        debugPrint("Remote found: " .. i .. " -> " .. remote, "DEBUG")
                     else
-                        print("DEBUG - Failed to find remote:", i)
+                        debugPrint("Failed to find remote: " .. i, "ERROR")
                     end
                 end
             end)
@@ -672,12 +706,12 @@ local function setupBedwars()
             end)
         end
         
-        print(" DEBUG - CombatConstant loaded:", combatConstantSuccess)
+        debugPrint("CombatConstant loaded: " .. tostring(combatConstantSuccess), "DEBUG")
         if combatConstantSuccess then
-            print(" DEBUG - Original reach distance:", bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE)
+            debugPrint("Original reach distance: " .. tostring(bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE), "DEBUG")
         end
         
-        print("BEDWARS COMPONENTS LOADED - CombatConstant:", combatConstantSuccess and "SUCCESS" or "FAILED")
+        debugPrint("BEDWARS COMPONENTS LOADED - CombatConstant: " .. (combatConstantSuccess and "SUCCESS" or "FAILED"), "SUCCESS")
 
         pcall(function()
             local function updateStore(new, old)
@@ -713,7 +747,7 @@ local function setupBedwars()
     end)
     
     if not success then
-        print("FAILED TO SETUP BEDWARS COMPONENTS")
+        debugPrint("FAILED TO SETUP BEDWARS COMPONENTS", "ERROR")
     end
     
     return success
@@ -1063,158 +1097,158 @@ local function disableAutoChargeBow()
     return success
 end
 
-local hitboxParts = {}
-local swordHitboxEnabled = false
+local hitboxObjects = {}
+local hitboxSet = nil
 local hitboxConnections = {}
+local HitBoxesEnabled = false
 
-local function setupHitBoxes()
-    if not bedwarsLoaded or not bedwars.SwordController then
+local function createHitbox(ent)
+    debugPrint(string.format("createHitbox() called for entity: %s", ent.Player and ent.Player.Name or "NPC"), "HITBOX")
+    
+    if ent.Targetable and ent.Player then
+        local success = pcall(function()
+            local hitbox = Instance.new('Part')
+            hitbox.Size = Vector3.new(3, 6, 3) + Vector3.one * (Settings.HitBoxesExpandAmount / 5)
+            hitbox.Position = ent.RootPart.Position
+            hitbox.CanCollide = false
+            hitbox.Massless = true
+            hitbox.Transparency = 1
+            hitbox.Parent = ent.Character
+            
+            local weld = Instance.new('Motor6D')
+            weld.Part0 = hitbox
+            weld.Part1 = ent.RootPart
+            weld.Parent = hitbox
+            
+            hitboxObjects[ent] = hitbox
+            debugPrint(string.format("Created hitbox for %s with size: %s", ent.Player.Name, tostring(hitbox.Size)), "HITBOX")
+        end)
+        
+        if not success then
+            debugPrint(string.format("Failed to create hitbox for %s", ent.Player and ent.Player.Name or "unknown"), "HITBOX")
+        end
+    end
+end
+
+local function removeHitbox(ent)
+    if hitboxObjects[ent] then
+        hitboxObjects[ent]:Destroy()
+        hitboxObjects[ent] = nil
+        debugPrint(string.format("Removed hitbox for %s", ent.Player and ent.Player.Name or "unknown"), "HITBOX")
+    end
+end
+
+local function applySwordHitbox(enabled)
+    if not bedwarsLoaded or not bedwars or not bedwars.SwordController then
+        debugPrint("applySwordHitbox() failed: bedwars not loaded or SwordController missing", "HITBOX")
         return false
     end
     
-    local function applySwordHitBox(enabled)
-        if not bedwars.SwordController.swingSwordInRegion then
+    if not bedwars.SwordController.swingSwordInRegion then
+        debugPrint("applySwordHitbox() failed: swingSwordInRegion function not found", "HITBOX")
+        return false
+    end
+    
+    local success, errorMsg = pcall(function()
+        if enabled then
+            debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (Settings.HitBoxesExpandAmount / 3))
+            hitboxSet = true
+            debugPrint(string.format("Applied sword hitbox with range: %.2f", Settings.HitBoxesExpandAmount / 3), "HITBOX")
+        else
+            debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
+            hitboxSet = nil
+            debugPrint("Removed sword hitbox, restored to 3.8", "HITBOX")
+        end
+    end)
+    
+    if not success then
+        debugPrint("applySwordHitbox() failed to modify swingSwordInRegion: " .. tostring(errorMsg), "HITBOX")
+    end
+    
+    return success
+end
+
+local function updatePlayerHitboxes()
+    for ent, part in pairs(hitboxObjects) do
+        if part and part.Parent then
+            part.Size = Vector3.new(3, 6, 3) + Vector3.one * (Settings.HitBoxesExpandAmount / 5)
+            debugPrint(string.format("Updated hitbox size for %s: %s", ent.Player.Name, tostring(part.Size)), "HITBOX")
+        end
+    end
+end
+
+local function enableHitboxes()
+    debugPrint(string.format("enableHitboxes() called - Mode: %s, Expand: %.2f", Settings.HitBoxesMode, Settings.HitBoxesExpandAmount), "HITBOX")
+    
+    if not entitylib.Running then
+        entitylib.start()
+        debugPrint("Started entitylib for hitboxes", "HITBOX")
+    end
+    
+    if Settings.HitBoxesMode == 'Sword' then
+        local success = applySwordHitbox(true)
+        if success then
+            HitBoxesEnabled = true
+            debugPrint("Sword hitboxes enabled successfully", "HITBOX")
+            return true
+        else
+            debugPrint("Failed to enable sword hitboxes", "HITBOX")
             return false
         end
+    else 
+        for _, conn in pairs(hitboxConnections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        hitboxConnections = {}
+        table.insert(hitboxConnections, entitylib.Events.EntityAdded:Connect(createHitbox))
+        table.insert(hitboxConnections, entitylib.Events.EntityRemoved:Connect(removeHitbox))
         
-        local success = pcall(function()
-            if enabled then
-                debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, Settings.HitBoxesExpandAmount)
-                swordHitboxEnabled = true
-            else
-                debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
-                swordHitboxEnabled = false
-            end
-        end)
-        return success
-    end
-    
-    local function createPlayerHitBox(player)
-        if player == lplr or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
-            return
+        for _, ent in pairs(entitylib.List) do
+            createHitbox(ent)
         end
         
-        local success = pcall(function()
-            local char = player.Character
-            local hrp = char.HumanoidRootPart
-            
-            if hitboxParts[player] then
-                hitboxParts[player]:Destroy()
-            end
-            
-            local hitbox = Instance.new("Part")
-            hitbox.Name = "CustomHitBox"
-            hitbox.Size = Vector3.new(Settings.HitBoxesExpandAmount, Settings.HitBoxesExpandAmount, Settings.HitBoxesExpandAmount)
-            hitbox.Position = hrp.Position
-            hitbox.CanCollide = false
-            hitbox.Massless = true
-            hitbox.Transparency = 1 
-            hitbox.Parent = char
-            
-            local weld = Instance.new("WeldConstraint")
-            weld.Part0 = hitbox
-            weld.Part1 = hrp
-            weld.Parent = hitbox
-            
-            hitboxParts[player] = hitbox
-        end)
-        
-        return success
+        HitBoxesEnabled = true
+        debugPrint(string.format("Player hitboxes enabled successfully - Created %d hitboxes", #hitboxObjects), "HITBOX")
+        return true
     end
+end
+
+local function disableHitboxes()
+    debugPrint("disableHitboxes() called", "HITBOX")
     
-    local function clearPlayerHitBoxes()
-        for player, part in pairs(hitboxParts) do
+    if Settings.HitBoxesMode == 'Sword' then
+        if hitboxSet then
+            applySwordHitbox(false)
+        end
+    else
+        for ent, part in pairs(hitboxObjects) do
             if part and part.Parent then
                 part:Destroy()
             end
         end
-        hitboxParts = {}
+        table.clear(hitboxObjects)
+        debugPrint("Cleaned up all player hitboxes", "HITBOX")
     end
     
-    local function applyPlayerHitBoxes(enabled)
-        if enabled then
-            for _, player in pairs(playersService:GetPlayers()) do
-                if player ~= lplr then
-                    createPlayerHitBox(player)
-                end
-            end
-            
-            local newPlayerConnection = playersService.PlayerAdded:Connect(function(player)
-                if player ~= lplr then
-                    player.CharacterAdded:Connect(function()
-                        task.wait(1) 
-                        createPlayerHitBox(player)
-                    end)
-                end
-            end)
-            table.insert(hitboxConnections, newPlayerConnection)
-            
-            for _, player in pairs(playersService:GetPlayers()) do
-                if player ~= lplr then
-                    local charConnection = player.CharacterAdded:Connect(function()
-                        task.wait(1)
-                        createPlayerHitBox(player)
-                    end)
-                    table.insert(hitboxConnections, charConnection)
-                end
-            end
-        else
-            clearPlayerHitBoxes()
-        end
-    end
-    
-    return {
-        applySwordHitBox = applySwordHitBox,
-        applyPlayerHitBoxes = applyPlayerHitBoxes,
-        clearPlayerHitBoxes = clearPlayerHitBoxes
-    }
-end
-
-local hitboxSystem = setupHitBoxes()
-local HitBoxesEnabled = false
-
-local function enableHitboxes()
-    if not entitylib.Running then
-        entitylib.start()
-    end
-    
-    if not hitboxSystem then
-        return false
-    end
-
-    if Settings.HitBoxesMode == 'Sword' then
-        local success = hitboxSystem.applySwordHitBox(true)
-        if success then
-            HitBoxesEnabled = true
-            return true
-        end
-    else 
-        hitboxSystem.applyPlayerHitBoxes(true)
-        HitBoxesEnabled = true
-        return true
-    end
-    
-    return false
-end
-
-local function disableHitboxes()
-    if not hitboxSystem then
-        return false
-    end
-    
-    if Settings.HitBoxesMode == 'Sword' then
-        hitboxSystem.applySwordHitBox(false)
-    else
-        hitboxSystem.applyPlayerHitBoxes(false)
-    end
-    
-    for _, v in pairs(hitboxConnections) do
-        pcall(function() v:Disconnect() end)
+    for _, conn in pairs(hitboxConnections) do
+        pcall(function() conn:Disconnect() end)
     end
     hitboxConnections = {}
     
     HitBoxesEnabled = false
+    debugPrint("Hitboxes disabled successfully", "HITBOX")
     return true
+end
+
+local function updateHitboxSettings()
+    if HitBoxesEnabled then
+        if Settings.HitBoxesMode == 'Sword' and hitboxSet then
+            applySwordHitbox(true) 
+        elseif Settings.HitBoxesMode == 'Player' then
+            updatePlayerHitboxes()
+        end
+        debugPrint(string.format("Updated hitbox settings - Mode: %s, Expand: %.2f", Settings.HitBoxesMode, Settings.HitBoxesExpandAmount), "HITBOX")
+    end
 end
 
 local SprintEnabled = false
@@ -1563,5 +1597,18 @@ addCleanupFunction(function()
         if velocityOld and bedwars.KnockbackUtil then
             bedwars.KnockbackUtil.applyKnockback = velocityOld
         end
+        for ent, part in pairs(hitboxObjects) do
+            if part and part.Parent then
+                part:Destroy()
+            end
+        end
+        table.clear(hitboxObjects)
+        if hitboxSet then
+            applySwordHitbox(false)
+        end
+        for _, conn in pairs(hitboxConnections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        table.clear(hitboxConnections)
     end)
 end)
