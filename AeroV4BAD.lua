@@ -316,10 +316,8 @@ local Settings = {
 }
 
 pcall(function()
-    for _, gui in pairs(mainPlayersService.LocalPlayer.PlayerGui:GetChildren()) do
-        if gui.Name == "VapeNotifications" or gui.Name == "VapeESPGui" then
-            gui:Destroy()
-        end
+    if mainPlayersService.LocalPlayer.PlayerGui:FindFirstChild("VapeNotifications") then
+        mainPlayersService.LocalPlayer.PlayerGui:FindFirstChild("VapeNotifications"):Destroy()
     end
 end)
 
@@ -328,105 +326,51 @@ NotificationGui.ResetOnSpawn = false
 NotificationGui.Name = "VapeNotifications"
 
 addCleanupFunction(function()
-    pcall(function()
-        if NotificationGui and NotificationGui.Parent then
-            NotificationGui:Destroy()
-        end
-    end)
+    if NotificationGui and NotificationGui.Parent then
+        NotificationGui:Destroy()
+    end
 end)
 
 local function showNotification(message, duration)
-    duration = duration or 1.5
-    
-    -- Check for existing notifications and adjust position
-    local existingNotifications = {}
-    for _, child in pairs(NotificationGui:GetChildren()) do
-        if child:IsA("Frame") and child.Name:find("notification_") then
-            table.insert(existingNotifications, child)
-        end
-    end
-    
-    local yOffset = 20 + (#existingNotifications * 70)
+    duration = duration or 3
     
     local notification = Instance.new("Frame")
-    notification.Name = "notification_" .. tostring(math.random(1000, 9999))
-    notification.Size = UDim2.new(0, 380, 0, 65)
-    notification.Position = UDim2.new(1, -400, 0, yOffset)
-    notification.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    notification.Size = UDim2.new(0, 350, 0, 60)
+    notification.Position = UDim2.new(0.5, -175, 0, 20)
+    notification.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
     notification.BorderSizePixel = 0
+    notification.AnchorPoint = Vector2.new(0.5, 0)
     notification.Parent = NotificationGui
 
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
+    corner.CornerRadius = UDim.new(0, 8)
     corner.Parent = notification
 
     local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(85, 170, 255)
-    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(100, 100, 100)
+    stroke.Thickness = 1
     stroke.Parent = notification
 
-    local gradient = Instance.new("UIGradient")
-    gradient.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 25, 35)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 20))
-    }
-    gradient.Rotation = 45
-    gradient.Parent = notification
-
-    local shadow = Instance.new("Frame")
-    shadow.Name = "Shadow"
-    shadow.Size = UDim2.new(1, 6, 1, 6)
-    shadow.Position = UDim2.new(0, -3, 0, -3)
-    shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    shadow.BackgroundTransparency = 0.7
-    shadow.ZIndex = notification.ZIndex - 1
-    shadow.Parent = notification
-    
-    local shadowCorner = Instance.new("UICorner")
-    shadowCorner.CornerRadius = UDim.new(0, 12)
-    shadowCorner.Parent = shadow
-
-    local iconFrame = Instance.new("Frame")
-    iconFrame.Size = UDim2.new(0, 45, 0, 45)
-    iconFrame.Position = UDim2.new(0, 10, 0.5, -22.5)
-    iconFrame.BackgroundColor3 = Color3.fromRGB(85, 170, 255)
-    iconFrame.BorderSizePixel = 0
-    iconFrame.Parent = notification
-    
-    local iconCorner = Instance.new("UICorner")
-    iconCorner.CornerRadius = UDim.new(0, 8)
-    iconCorner.Parent = iconFrame
-
-    local icon = Instance.new("TextLabel")
-    icon.Size = UDim2.new(1, 0, 1, 0)
-    icon.BackgroundTransparency = 1
-    icon.Text = "⚡"
-    icon.TextColor3 = Color3.new(1, 1, 1)
-    icon.Font = Enum.Font.GothamBold
-    icon.TextSize = 20
-    icon.Parent = iconFrame
-
     local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1, -70, 1, 0)
-    textLabel.Position = UDim2.new(0, 65, 0, 0)
+    textLabel.Size = UDim2.new(1, -20, 1, 0)
+    textLabel.Position = UDim2.new(0, 10, 0, 0)
     textLabel.BackgroundTransparency = 1
     textLabel.TextColor3 = Color3.new(1, 1, 1)
     textLabel.Font = Enum.Font.GothamSemibold
-    textLabel.TextSize = 14
+    textLabel.TextSize = 16
     textLabel.Text = message
     textLabel.TextXAlignment = Enum.TextXAlignment.Left
     textLabel.TextWrapped = true
     textLabel.Parent = notification
 
-    notification.Position = UDim2.new(1, 0, 0, yOffset)
-    notification:TweenPosition(UDim2.new(1, -400, 0, yOffset), "Out", "Quart", 0.4, true)
+    notification.Position = UDim2.new(0.5, -175, 0, -70)
+    notification:TweenPosition(UDim2.new(0.5, -175, 0, 20), "Out", "Quad", 0.3, true)
 
-    task.spawn(function()
-        task.wait(duration)
-        notification:TweenPosition(UDim2.new(1, 0, 0, yOffset), "In", "Quart", 0.3, true)
-        task.wait(0.3)
-        notification:Destroy()
-    end)
+    task.wait(duration)
+    
+    notification:TweenPosition(UDim2.new(0.5, -175, 0, -70), "In", "Quad", 0.3, true)
+    task.wait(0.3)
+    notification:Destroy()
 end
 
 local function waitForBedwars()
@@ -526,13 +470,6 @@ pcall(function()
     end
 end)
 
-pcall(function()
-    local existingESPGui = mainPlayersService.LocalPlayer.PlayerGui:FindFirstChild("VapeESPGui")
-    if existingESPGui then
-        existingESPGui:Destroy()
-    end
-end)
-
 local espfold = Instance.new("Folder")
 local gui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
 gui.ResetOnSpawn = false
@@ -540,12 +477,10 @@ gui.Name = "VapeESPGui"
 espfold.Parent = gui
 
 addCleanupFunction(function()
-    pcall(function()
-        if gui and gui.Parent then
-            gui:Destroy()
-        end
-        resetESP()
-    end)
+    if gui and gui.Parent then
+        gui:Destroy()
+    end
+    resetESP()
 end)
 
 local function espadd(v, icon)
