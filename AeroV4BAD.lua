@@ -308,12 +308,18 @@ repeat task.wait() until game:IsLoaded()
 -- Settings (yo can change these values)
 local Settings = {
     ToggleKeybind = "RightShift",
-    HitBoxesMode = "Player", -- "Sword" or "Player"
+    HitBoxesMode = "Sword", -- "Sword" or "Player"
     HitBoxesExpandAmount = 30, 
     HitFixEnabled = true,
     InstantPPEnabled = true,
     AutoChargeBowEnabled = false,
     AutoToolEnabled = true,
+    VelocityEnabled = true,
+    VelocityHorizontal = 75,
+    VelocityVertical = 75,
+    VelocityChance = 100,
+    VelocityTargetCheck = false,
+    DebugMode = false, -- for aero to debug shi
 }
 
 pcall(function()
@@ -473,6 +479,24 @@ local function waitForBedwars()
 end
 
 local knit = waitForBedwars()
+
+local function debugPrint(message, level)
+    if not Settings.DebugMode then return end
+    level = level or "INFO"
+    local timestamp = os.date("%H:%M:%S")
+    print(string.format("[%s] [%s] %s", timestamp, level, message))
+end
+
+local Velocity = {
+    Enabled = Settings.VelocityEnabled,
+    Horizontal = {Value = Settings.VelocityHorizontal},
+    Vertical = {Value = Settings.VelocityVertical},
+    Chance = {Value = Settings.VelocityChance},
+    TargetCheck = {Enabled = Settings.VelocityTargetCheck}
+}
+local velocityOld = nil
+local rand = Random.new()
+
 local bedwars = {}
 local remotes = {}
 local store = {
@@ -537,6 +561,48 @@ local function hotbarSwitch(slot)
     return false
 end
 
+local function entityPosition(options)
+    options = options or {}
+    local range = options.Range or 50
+    local part = options.Part or 'RootPart'
+    local players = options.Players
+    
+    debugPrint(string.format("entityPosition() called - Range: %d, Part: %s, Players: %s", 
+        range, part, tostring(players)), "ENTITY")
+    
+    if not entitylib.isAlive then 
+        debugPrint("entityPosition() failed: player not alive", "ENTITY")
+        return nil 
+    end
+    
+    local localPos = entitylib.character.RootPart.Position
+    local entityCount = 0
+    local targetableCount = 0
+    
+    for _, entity in pairs(entitylib.List) do
+        entityCount = entityCount + 1
+        if entity.Targetable and entity[part] then
+            targetableCount = targetableCount + 1
+            local distance = (localPos - entity[part].Position).Magnitude
+            debugPrint(string.format("Found entity at distance: %.2f (range: %d)", distance, range), "ENTITY")
+            
+            if distance <= range then
+                if players and entity.Player then
+                    debugPrint(string.format("entityPosition() found player target: %s", entity.Player.Name), "ENTITY")
+                    return entity
+                elseif not players then
+                    debugPrint("entityPosition() found non-player target", "ENTITY")
+                    return entity
+                end
+            end
+        end
+    end
+    
+    debugPrint(string.format("entityPosition() no targets found - Total entities: %d, Targetable: %d", 
+        entityCount, targetableCount), "ENTITY")
+    return nil
+end
+
 local function setupBedwars()
     if not knit then return false end
     
@@ -558,6 +624,9 @@ local function setupBedwars()
         bedwars.Store = require(lplr.PlayerScripts.TS.ui.store).ClientStore
         
         bedwars.BlockBreaker = knit.Controllers.BlockBreakController.blockBreaker
+        
+        bedwars.KnockbackUtil = require(mainReplicatedStorage.TS.damage['knockback-util']).KnockbackUtil
+        debugPrint("bedwars.KnockbackUtil loaded successfully", "SUCCESS")
         
         pcall(function()
             bedwars.QueryUtil = require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil
@@ -829,7 +898,7 @@ local function hookClientGet()
                             
                             if HitFixEnabled then
                                 attackTable.validate.raycast = attackTable.validate.raycast or {}
-                                attackTable.validate.selfPosition.value += CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
+                                attackTable.validate.selfPosition.value = selfpos + CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
                             end
                         end
                     end
@@ -1231,6 +1300,116 @@ local function switchHotbarItem(block)
     return false
 end
 
+local function enableVelocity()
+    debugPrint("enableVelocity() called", "DEBUG")
+    
+    if not bedwarsLoaded then
+        debugPrint("enableVelocity() failed: bedwarsLoaded is false", "ERROR")
+        return false
+    end
+    
+    if not bedwars.KnockbackUtil then
+        debugPrint("enableVelocity() failed: bedwars.KnockbackUtil not found", "ERROR")
+        return false
+    end
+    
+    debugPrint("enableVelocity() prerequisites met, attempting to hook", "DEBUG")
+    
+    local success = pcall(function()
+        if not velocityOld then
+            velocityOld = bedwars.KnockbackUtil.applyKnockback
+            debugPrint("enableVelocity() stored original applyKnockback function", "DEBUG")
+        end
+        
+        bedwars.KnockbackUtil.applyKnockback = function(root, mass, dir, knockback, ...)
+            debugPrint(string.format("Knockback applied! Chance: %d%%, Horizontal: %d%%, Vertical: %d%%", 
+                Velocity.Chance.Value, Velocity.Horizontal.Value, Velocity.Vertical.Value), "VELOCITY")
+            
+            local chanceRoll = rand:NextNumber(0, 100)
+            debugPrint(string.format("Chance roll: %.2f vs %d", chanceRoll, Velocity.Chance.Value), "VELOCITY")
+            
+            if chanceRoll > Velocity.Chance.Value then 
+                debugPrint("Chance roll failed, applying normal knockback", "VELOCITY")
+                return velocityOld(root, mass, dir, knockback, ...)
+            end
+            
+            local check = (not Velocity.TargetCheck.Enabled) or entityPosition({
+                Range = 50,
+                Part = 'RootPart',
+                Players = true
+            })
+            
+            debugPrint(string.format("Target check enabled: %s, Check result: %s", 
+                tostring(Velocity.TargetCheck.Enabled), tostring(check ~= nil)), "VELOCITY")
+
+            if check then
+                knockback = knockback or {}
+                local originalH = knockback.horizontal or 1
+                local originalV = knockback.vertical or 1
+                
+                if Velocity.Horizontal.Value == 0 and Velocity.Vertical.Value == 0 then 
+                    debugPrint("Both horizontal and vertical are 0, blocking knockback completely", "VELOCITY")
+                    return 
+                end
+                
+                knockback.horizontal = originalH * (Velocity.Horizontal.Value / 100)
+                knockback.vertical = originalV * (Velocity.Vertical.Value / 100)
+                
+                debugPrint(string.format("Modified knockback - H: %.2f -> %.2f, V: %.2f -> %.2f", 
+                    originalH, knockback.horizontal, originalV, knockback.vertical), "VELOCITY")
+            else
+                debugPrint("Target check failed, applying normal knockback", "VELOCITY")
+            end
+            
+            return velocityOld(root, mass, dir, knockback, ...)
+        end
+        
+        Velocity.Enabled = true
+        debugPrint("enableVelocity() hook applied successfully", "DEBUG")
+    end)
+    
+    if success then
+        debugPrint("enableVelocity() completed successfully", "SUCCESS")
+    else
+        debugPrint("enableVelocity() failed with error", "ERROR")
+    end
+    
+    return success
+end
+
+local function disableVelocity()
+    debugPrint("disableVelocity() called", "DEBUG")
+    
+    if not bedwarsLoaded then
+        debugPrint("disableVelocity() failed: bedwarsLoaded is false", "ERROR")
+        return false
+    end
+    
+    if not bedwars.KnockbackUtil then
+        debugPrint("disableVelocity() failed: bedwars.KnockbackUtil not found", "ERROR")
+        return false
+    end
+    
+    if not velocityOld then
+        debugPrint("disableVelocity() failed: velocityOld not stored", "ERROR")
+        return false
+    end
+    
+    local success = pcall(function()
+        bedwars.KnockbackUtil.applyKnockback = velocityOld
+        Velocity.Enabled = false
+        debugPrint("disableVelocity() restored original function", "DEBUG")
+    end)
+    
+    if success then
+        debugPrint("disableVelocity() completed successfully", "SUCCESS")
+    else
+        debugPrint("disableVelocity() failed with error", "ERROR")
+    end
+    
+    return success
+end
+
 local function enableAutoTool()
     if AutoToolEnabled or not bedwarsLoaded or not bedwars.BlockBreaker then return false end
     
@@ -1272,6 +1451,7 @@ local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
 
 local function enableAllFeatures()
+    debugPrint("enableAllFeatures() called", "DEBUG")
     recreateESP()
     if Settings.InstantPPEnabled then
         enableInstantPP()
@@ -1287,10 +1467,14 @@ local function enableAllFeatures()
     if Settings.AutoToolEnabled then
         enableAutoTool()
     end
+    if Settings.VelocityEnabled then
+        enableVelocity()
+    end
     allFeaturesEnabled = true
 end
 
 local function disableAllFeatures()
+    debugPrint("disableAllFeatures() called", "DEBUG")
     resetESP()
     disableInstantPP()
     disableHitboxes()
@@ -1298,6 +1482,7 @@ local function disableAllFeatures()
     disableHitFix()
     disableAutoChargeBow()
     disableAutoTool()
+    disableVelocity()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -1308,9 +1493,12 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
     if gameProcessed then return end
 
     if input.KeyCode == Enum.KeyCode[Settings.ToggleKeybind] then
+        debugPrint(string.format("Toggle key pressed - Current state: %s", tostring(allFeaturesEnabled)), "INPUT")
         if allFeaturesEnabled then
+            debugPrint("Disabling all features", "INPUT")
             disableAllFeatures()
         else
+            debugPrint("Enabling all features", "INPUT")
             enableAllFeatures()
             task.spawn(function()
                 showNotification("Script enabled. Press RightShift to disable.", 3)
@@ -1335,6 +1523,11 @@ if bedwarsLoaded then
     setupHitFix()
 end
 
+debugPrint("Script initialization starting", "INIT")
+debugPrint(string.format("Bedwars loaded: %s", tostring(bedwarsLoaded)), "INIT")
+debugPrint(string.format("Velocity settings - H: %d%%, V: %d%%, Chance: %d%%, TargetCheck: %s", 
+    Settings.VelocityHorizontal, Settings.VelocityVertical, Settings.VelocityChance, tostring(Settings.VelocityTargetCheck)), "INIT")
+
 enableAllFeatures()
 task.spawn(function()
     local statusMsg = "Script loaded and enabled. Press RightShift to toggle on/off."
@@ -1342,6 +1535,7 @@ task.spawn(function()
         statusMsg = statusMsg .. " HitFix: " .. (Settings.HitFixEnabled and "ON" or "OFF") .. ", HitBoxes: " .. Settings.HitBoxesMode
     end
     showNotification(statusMsg, 4)
+    debugPrint("Script fully initialized and ready", "INIT")
 end)
 
 addCleanupFunction(function()
@@ -1365,6 +1559,9 @@ addCleanupFunction(function()
         end
         if oldHitBlock and bedwars.BlockBreaker then
             bedwars.BlockBreaker.hitBlock = oldHitBlock
+        end
+        if velocityOld and bedwars.KnockbackUtil then
+            bedwars.KnockbackUtil.applyKnockback = velocityOld
         end
     end)
 end)
