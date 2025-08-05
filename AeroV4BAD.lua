@@ -319,6 +319,8 @@ local Settings = {
     VelocityVertical = 75,
     VelocityChance = 100,
     VelocityTargetCheck = false,
+    FastBreakEnabled = true,
+    FastBreakSpeed = 0.24,
     DebugMode = false, -- for aero to debug shi
 }
 
@@ -616,10 +618,10 @@ end
 
 local function setupBedwars()
     if not knit then return false end
-    
+
     local success = pcall(function()
         bedwars.Client = require(mainReplicatedStorage.TS.remotes).default.Client
-        
+
         bedwars.SwordController = knit.Controllers.SwordController
         debugPrint("SwordController loaded: " .. tostring(bedwars.SwordController ~= nil), "DEBUG")
         if bedwars.SwordController and bedwars.SwordController.swingSwordInRegion then
@@ -627,7 +629,7 @@ local function setupBedwars()
         else
             debugPrint("swingSwordInRegion function NOT found", "ERROR")
         end
-        
+
         bedwars.SprintController = knit.Controllers.SprintController
         bedwars.ProjectileController = knit.Controllers.ProjectileController
         bedwars.QueryUtil = require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil or workspace
@@ -635,17 +637,18 @@ local function setupBedwars()
         bedwars.ItemMeta = debug.getupvalue(require(mainReplicatedStorage.TS.item['item-meta']).getItemMeta, 1)
         bedwars.Store = require(lplr.PlayerScripts.TS.ui.store).ClientStore
         bedwars.BlockBreaker = knit.Controllers.BlockBreakController.blockBreaker
+        bedwars.BlockBreakController = knit.Controllers.BlockBreakController
         bedwars.KnockbackUtil = require(mainReplicatedStorage.TS.damage['knockback-util']).KnockbackUtil
-        
+
         debugPrint("bedwars.KnockbackUtil loaded successfully", "SUCCESS")
-        
+
         local combatConstantSuccess = false
         local combatConstantPaths = {
             function() return require(mainReplicatedStorage.TS.combat['combat-constant']).CombatConstant end,
             function() return require(mainReplicatedStorage.TS.combat.CombatConstant) end,
             function() return knit.Controllers.SwordController.CombatConstant end
         }
-        
+
         for i, pathFunc in ipairs(combatConstantPaths) do
             local success = pcall(function()
                 bedwars.CombatConstant = pathFunc()
@@ -656,7 +659,7 @@ local function setupBedwars()
             end)
             if combatConstantSuccess then break end
         end
-        
+
         if not combatConstantSuccess then
             debugPrint("All CombatConstant paths failed, trying direct constant modification", "DEBUG")
             pcall(function()
@@ -669,13 +672,13 @@ local function setupBedwars()
                 end
             end)
         end
-        
+
         if combatConstantSuccess and bedwars.Client then
             pcall(function()
                 local remoteNames = {
                     AttackEntity = bedwars.SwordController.sendServerRequest
                 }
-                
+
                 local function dumpRemote(tab)
                     local ind
                     for i, v in tab do
@@ -686,7 +689,7 @@ local function setupBedwars()
                     end
                     return ind and tab[ind + 1] or ''
                 end
-                
+
                 remotes = remotes or {}
                 for i, v in remoteNames do
                     local remote = dumpRemote(debug.getconstants(v))
@@ -705,13 +708,29 @@ local function setupBedwars()
                 bedwars.AttackEntityRemote = bedwars.Client:Get("AttackEntity")
             end)
         end
-        
+
         debugPrint("CombatConstant loaded: " .. tostring(combatConstantSuccess), "DEBUG")
         if combatConstantSuccess then
             debugPrint("Original reach distance: " .. tostring(bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE), "DEBUG")
         end
-        
+
         debugPrint("BEDWARS COMPONENTS LOADED - CombatConstant: " .. (combatConstantSuccess and "SUCCESS" or "FAILED"), "SUCCESS")
+
+        if knit.Controllers.BlockBreakController then
+            debugPrint("BlockBreakController found: " .. tostring(knit.Controllers.BlockBreakController ~= nil), "DEBUG")
+            if knit.Controllers.BlockBreakController.blockBreaker then
+                debugPrint("blockBreaker found: " .. tostring(knit.Controllers.BlockBreakController.blockBreaker ~= nil), "DEBUG")
+                if knit.Controllers.BlockBreakController.blockBreaker.setCooldown then
+                    debugPrint("setCooldown function found: " .. tostring(type(knit.Controllers.BlockBreakController.blockBreaker.setCooldown)), "DEBUG")
+                else
+                    debugPrint("setCooldown function NOT found", "ERROR")
+                end
+            else
+                debugPrint("blockBreaker NOT found", "ERROR")
+            end
+        else
+            debugPrint("BlockBreakController NOT found", "ERROR")
+        end
 
         pcall(function()
             local function updateStore(new, old)
@@ -736,20 +755,21 @@ local function setupBedwars()
 
             local storeChanged = bedwars.Store.changed:connect(updateStore)
             updateStore(bedwars.Store:getState(), {})
-            
+
             addCleanupFunction(function()
                 if storeChanged then
                     storeChanged:disconnect()
                 end
             end)
         end)
+
         return true
     end)
-    
+
     if not success then
         debugPrint("FAILED TO SETUP BEDWARS COMPONENTS", "ERROR")
     end
-    
+
     return success
 end
 
@@ -1101,6 +1121,8 @@ local hitboxObjects = {}
 local hitboxSet = nil
 local hitboxConnections = {}
 local HitBoxesEnabled = false
+
+local FastBreakEnabled = false
 
 local function createHitbox(ent)
     debugPrint(string.format("createHitbox() called for entity: %s", ent.Player and ent.Player.Name or "NPC"), "HITBOX")
@@ -1481,6 +1503,66 @@ local function disableAutoTool()
     return success
 end
 
+local fastBreakLoop = nil
+
+local function enableFastBreak()
+    if FastBreakEnabled or not bedwarsLoaded then return false end
+    
+    debugPrint("enableFastBreak() called", "DEBUG")
+    
+    local success = pcall(function()
+        if bedwars.BlockBreakController and bedwars.BlockBreakController.blockBreaker then
+            FastBreakEnabled = true
+            
+            fastBreakLoop = task.spawn(function()
+                while FastBreakEnabled do
+                    if bedwars.BlockBreakController.blockBreaker and bedwars.BlockBreakController.blockBreaker.setCooldown then
+                        bedwars.BlockBreakController.blockBreaker:setCooldown(Settings.FastBreakSpeed)
+                    end
+                    task.wait(0.1)
+                end
+            end)
+            
+            debugPrint("FastBreak enabled successfully with speed: " .. tostring(Settings.FastBreakSpeed), "SUCCESS")
+        else
+            debugPrint("BlockBreakController or blockBreaker not found", "ERROR")
+            return false
+        end
+    end)
+    
+    if not success then
+        debugPrint("enableFastBreak() failed", "ERROR")
+    end
+    
+    return success
+end
+
+local function disableFastBreak()
+    if not FastBreakEnabled then return false end
+    
+    debugPrint("disableFastBreak() called", "DEBUG")
+    
+    FastBreakEnabled = false
+    
+    if fastBreakLoop then
+        task.cancel(fastBreakLoop)
+        fastBreakLoop = nil
+    end
+    
+    local success = pcall(function()
+        if bedwars.BlockBreakController and bedwars.BlockBreakController.blockBreaker and bedwars.BlockBreakController.blockBreaker.setCooldown then
+            bedwars.BlockBreakController.blockBreaker:setCooldown(0.3)
+            debugPrint("FastBreak disabled successfully, restored to 0.3", "SUCCESS")
+        end
+    end)
+    
+    if not success then
+        debugPrint("disableFastBreak() failed", "ERROR")
+    end
+    
+    return success
+end
+
 local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
 
@@ -1504,6 +1586,9 @@ local function enableAllFeatures()
     if Settings.VelocityEnabled then
         enableVelocity()
     end
+    if Settings.FastBreakEnabled then
+        enableFastBreak()
+    end
     allFeaturesEnabled = true
 end
 
@@ -1517,6 +1602,7 @@ local function disableAllFeatures()
     disableAutoChargeBow()
     disableAutoTool()
     disableVelocity()
+    disableFastBreak()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -1597,6 +1683,13 @@ addCleanupFunction(function()
         if velocityOld and bedwars.KnockbackUtil then
             bedwars.KnockbackUtil.applyKnockback = velocityOld
         end
+        if FastBreakEnabled then
+            disableFastBreak()
+        end
+        if fastBreakLoop then
+            task.cancel(fastBreakLoop)
+            fastBreakLoop = nil
+        end
         for ent, part in pairs(hitboxObjects) do
             if part and part.Parent then
                 part:Destroy()
@@ -1612,3 +1705,4 @@ addCleanupFunction(function()
         table.clear(hitboxConnections)
     end)
 end)
+
