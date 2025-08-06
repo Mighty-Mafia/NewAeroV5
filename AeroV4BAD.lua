@@ -315,15 +315,12 @@ local Settings = {
     AutoChargeBowEnabled = false,
     AutoToolEnabled = true,
     VelocityEnabled = true,
-    VelocityHorizontal = 65,
-    VelocityVertical = 65,
+    VelocityHorizontal = 75,
+    VelocityVertical = 75,
     VelocityChance = 100,
     VelocityTargetCheck = false,
     FastBreakEnabled = true,
     FastBreakSpeed = 0.21,
-    BedPlatesEnabled = true,
-    BedPlatesBackground = true,
-    BedPlatesBackgroundOpacity = 0.5,
     DebugMode = false, -- for aero to debug shi
 }
 
@@ -642,11 +639,6 @@ local function setupBedwars()
         bedwars.BlockBreaker = knit.Controllers.BlockBreakController.blockBreaker
         bedwars.BlockBreakController = knit.Controllers.BlockBreakController
         bedwars.KnockbackUtil = require(mainReplicatedStorage.TS.damage['knockback-util']).KnockbackUtil
-        bedwars.BlockEngine = require(lplr.PlayerScripts.TS.lib['block-engine']['client-block-engine']).ClientBlockEngine
-        bedwars.getIcon = function(item, showinv)
-            local itemmeta = bedwars.ItemMeta[item.itemType]
-            return itemmeta and showinv and itemmeta.image or ''
-        end
 
         debugPrint("bedwars.KnockbackUtil loaded successfully", "SUCCESS")
 
@@ -787,7 +779,6 @@ local oldCalculateImportantLaunchValues = nil
 
 local collectionService = game:GetService("CollectionService")
 local debris = game:GetService("Debris")
-local tweenService = cloneref(game:GetService('TweenService'))
 local Icons = {
     ["iron"] = "rbxassetid://6850537969",
     ["bee"] = "rbxassetid://7343272839",
@@ -813,206 +804,11 @@ gui.ResetOnSpawn = false
 gui.Name = "VapeESPGui"
 espfold.Parent = gui
 
-local BedPlatesFolder = Instance.new('Folder')
-BedPlatesFolder.Name = 'BedPlates'
-BedPlatesFolder.Parent = gui
-local bedPlatesReferences = {}
-local bedPlatesConnections = {}
-local BedPlatesEnabled = false
-local sides = {}
-
-for _, v in pairs(Enum.NormalId:GetEnumItems()) do
-    table.insert(sides, Vector3.FromNormalId(v) * 3)
-end
-
-local function addBlur(parent)
-    local blur = Instance.new('ImageLabel')
-    blur.Name = 'Blur'
-    blur.Size = UDim2.new(1, 89, 1, 52)
-    blur.Position = UDim2.fromOffset(-48, -31)
-    blur.BackgroundTransparency = 1
-    blur.Image = 'rbxasset://textures/ui/GuiImagePlaceholder.png'
-    blur.ScaleType = Enum.ScaleType.Slice
-    blur.SliceCenter = Rect.new(52, 31, 261, 502)
-    blur.Parent = parent
-    return blur
-end
-
-local function collection(tags, module, customadd, customremove)
-    tags = typeof(tags) ~= 'table' and {tags} or tags
-    local objs, connections = {}, {}
-
-    for _, tag in pairs(tags) do
-        table.insert(connections, collectionService:GetInstanceAddedSignal(tag):Connect(function(v)
-            if customadd then
-                customadd(objs, v, tag)
-                return
-            end
-            table.insert(objs, v)
-        end))
-        table.insert(connections, collectionService:GetInstanceRemovedSignal(tag):Connect(function(v)
-            if customremove then
-                customremove(objs, v, tag)
-                return
-            end
-            v = table.find(objs, v)
-            if v then
-                table.remove(objs, v)
-            end
-        end))
-
-        for _, v in pairs(collectionService:GetTagged(tag)) do
-            if customadd then
-                customadd(objs, v, tag)
-                continue
-            end
-            table.insert(objs, v)
-        end
-    end
-
-    local cleanFunc = function(self)
-        for _, v in pairs(connections) do
-            v:Disconnect()
-        end
-        table.clear(connections)
-        table.clear(objs)
-        table.clear(self)
-    end
-    return objs, cleanFunc
-end
-
-local function getBlocksInPoints(s, e)
-    if not bedwars or not bedwars.BlockController then return {} end
-    local blocks, list = bedwars.BlockController:getStore(), {}
-    for x = s.X, e.X do
-        for y = s.Y, e.Y do
-            for z = s.Z, e.Z do
-                local vec = Vector3.new(x, y, z)
-                if blocks:getBlockAt(vec) then
-                    table.insert(list, vec * 3)
-                end
-            end
-        end
-    end
-    return list
-end
-
-local function getPlacedBlock(pos)
-    if not pos then return end
-    if not bedwars or not bedwars.BlockController then return end
-    local roundedPosition = bedwars.BlockController:getBlockPosition(pos)
-    return bedwars.BlockController:getStore():getBlockAt(roundedPosition), roundedPosition
-end
-
-local function scanSide(self, start, tab)
-    for _, side in pairs(sides) do
-        for i = 1, 15 do
-            local block = getPlacedBlock(start + (side * i))
-            if not block or block == self then break end
-            if not block:GetAttribute('NoBreak') and not table.find(tab, block.Name) then
-                table.insert(tab, block.Name)
-            end
-        end
-    end
-end
-
-local function refreshAdornee(v)
-    for _, obj in pairs(v.Frame:GetChildren()) do
-        if obj:IsA('ImageLabel') and obj.Name ~= 'Blur' then
-            obj:Destroy()
-        end
-    end
-
-    local start = v.Adornee.Position
-    local alreadygot = {}
-    scanSide(v.Adornee, start, alreadygot)
-    scanSide(v.Adornee, start + Vector3.new(0, 0, 3), alreadygot)
-    
-    if bedwars and bedwars.ItemMeta then
-        table.sort(alreadygot, function(a, b)
-            return (bedwars.ItemMeta[a] and bedwars.ItemMeta[a].block and bedwars.ItemMeta[a].block.health or 0) > 
-                   (bedwars.ItemMeta[b] and bedwars.ItemMeta[b].block and bedwars.ItemMeta[b].block.health or 0)
-        end)
-    end
-    
-    v.Enabled = #alreadygot > 0
-
-    for _, block in pairs(alreadygot) do
-        local blockimage = Instance.new('ImageLabel')
-        blockimage.Size = UDim2.fromOffset(32, 32)
-        blockimage.BackgroundTransparency = 1
-        if bedwars and bedwars.ItemMeta and bedwars.ItemMeta[block] and bedwars.ItemMeta[block].image then
-            blockimage.Image = bedwars.ItemMeta[block].image
-        else
-            blockimage.Image = ""
-        end
-        blockimage.Parent = v.Frame
-    end
-end
-
-local function addBedPlate(v)
-    local billboard = Instance.new('BillboardGui')
-    billboard.Parent = BedPlatesFolder
-    billboard.Name = 'bed'
-    billboard.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
-    billboard.Size = UDim2.fromOffset(36, 36)
-    billboard.AlwaysOnTop = true
-    billboard.ClipsDescendants = false
-    billboard.Adornee = v
-    
-    local blur = addBlur(billboard)
-    blur.Visible = Settings.BedPlatesBackground
-    
-    local frame = Instance.new('Frame')
-    frame.Size = UDim2.fromScale(1, 1)
-    frame.BackgroundColor3 = Color3.fromRGB(85, 170, 255)
-    frame.BackgroundTransparency = 1 - (Settings.BedPlatesBackground and Settings.BedPlatesBackgroundOpacity or 0)
-    frame.Parent = billboard
-    
-    local layout = Instance.new('UIListLayout')
-    layout.FillDirection = Enum.FillDirection.Horizontal
-    layout.Padding = UDim.new(0, 4)
-    layout.VerticalAlignment = Enum.VerticalAlignment.Center
-    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    layout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
-        billboard.Size = UDim2.fromOffset(math.max(layout.AbsoluteContentSize.X + 4, 36), 36)
-    end)
-    layout.Parent = frame
-    
-    local corner = Instance.new('UICorner')
-    corner.CornerRadius = UDim.new(0, 4)
-    corner.Parent = frame
-    
-    bedPlatesReferences[v] = billboard
-    refreshAdornee(billboard)
-end
-
-local function removeBedPlate(v)
-    if bedPlatesReferences[v] then
-        bedPlatesReferences[v]:Destroy()
-        bedPlatesReferences[v] = nil
-    end
-end
-
-local function refreshNearBeds(data)
-    if not data or not data.blockRef or not data.blockRef.blockPosition then return end
-    local blockPos = data.blockRef.blockPosition * 3
-    for bed, billboard in pairs(bedPlatesReferences) do
-        if bed and bed.Position and (blockPos - bed.Position).Magnitude <= 30 then
-            refreshAdornee(billboard)
-        end
-    end
-end
-
 addCleanupFunction(function()
     if gui and gui.Parent then
         gui:Destroy()
     end
-    if BedPlatesFolder and BedPlatesFolder.Parent then
-        BedPlatesFolder:Destroy()
-    end
     resetESP()
-    disableBedPlates()
 end)
 
 local function espadd(v, icon)
@@ -1767,66 +1563,6 @@ local function disableFastBreak()
     return success
 end
 
-local function enableBedPlates()
-    if BedPlatesEnabled or not bedwarsLoaded then return false end
-    
-    debugPrint("enableBedPlates() called", "DEBUG")
-    
-    local success = pcall(function()
-        for _, v in pairs(collectionService:GetTagged('bed')) do 
-            addBedPlate(v)
-            debugPrint("Added BedPlate for existing bed", "DEBUG")
-        end
-        
-        table.insert(bedPlatesConnections, collectionService:GetInstanceAddedSignal('bed'):Connect(function(v)
-            addBedPlate(v)
-            debugPrint("Added BedPlate for new bed", "DEBUG")
-        end))
-        
-        table.insert(bedPlatesConnections, collectionService:GetInstanceRemovedSignal('bed'):Connect(function(v)
-            removeBedPlate(v)
-            debugPrint("Removed BedPlate for deleted bed", "DEBUG")
-        end))
-        
-        BedPlatesEnabled = true
-        debugPrint("BedPlates enabled successfully with " .. #collectionService:GetTagged('bed') .. " beds", "SUCCESS")
-    end)
-    
-    if not success then
-        debugPrint("enableBedPlates() failed", "ERROR")
-    end
-    
-    return success
-end
-
-local function disableBedPlates()
-    if not BedPlatesEnabled then return false end
-    
-    debugPrint("disableBedPlates() called", "DEBUG")
-    
-    local success = pcall(function()
-        for _, conn in pairs(bedPlatesConnections) do
-            pcall(function() conn:Disconnect() end)
-        end
-        bedPlatesConnections = {}
-        
-        for bed, billboard in pairs(bedPlatesReferences) do
-            billboard:Destroy()
-        end
-        bedPlatesReferences = {}
-        
-        BedPlatesFolder:ClearAllChildren()
-        BedPlatesEnabled = false
-        debugPrint("BedPlates disabled successfully", "SUCCESS")
-    end)
-    
-    if not success then
-        debugPrint("disableBedPlates() failed", "ERROR")
-    end
-    
-    return success
-end
-
 local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
 
@@ -1853,9 +1589,6 @@ local function enableAllFeatures()
     if Settings.FastBreakEnabled then
         enableFastBreak()
     end
-    if Settings.BedPlatesEnabled then
-        enableBedPlates()
-    end
     allFeaturesEnabled = true
 end
 
@@ -1870,7 +1603,6 @@ local function disableAllFeatures()
     disableAutoTool()
     disableVelocity()
     disableFastBreak()
-    disableBedPlates()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -1920,9 +1652,7 @@ enableAllFeatures()
 task.spawn(function()
     local statusMsg = "Script loaded and enabled. Press RightShift to toggle on/off."
     if bedwarsLoaded then
-        statusMsg = statusMsg .. " HitFix: " .. (Settings.HitFixEnabled and "ON" or "OFF") .. 
-                   ", HitBoxes: " .. Settings.HitBoxesMode .. 
-                   ", BedPlates: " .. (Settings.BedPlatesEnabled and "ON" or "OFF")
+        statusMsg = statusMsg .. " HitFix: " .. (Settings.HitFixEnabled and "ON" or "OFF") .. ", HitBoxes: " .. Settings.HitBoxesMode
     end
     showNotification(statusMsg, 4)
     debugPrint("Script fully initialized and ready", "INIT")
@@ -1973,18 +1703,5 @@ addCleanupFunction(function()
             pcall(function() conn:Disconnect() end)
         end
         table.clear(hitboxConnections)
-
-        if BedPlatesEnabled then
-            disableBedPlates()
-        end
-        for _, conn in pairs(bedPlatesConnections) do
-            pcall(function() conn:Disconnect() end)
-        end
-        table.clear(bedPlatesConnections)
-        table.clear(bedPlatesReferences)
-        if BedPlatesFolder and BedPlatesFolder.Parent then
-            BedPlatesFolder:Destroy()
-        end
-
     end)
 end)
