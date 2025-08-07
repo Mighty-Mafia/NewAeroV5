@@ -302,6 +302,7 @@ local mainReplicatedStorage = cloneref(game:GetService('ReplicatedStorage'))
 local mainRunService = cloneref(game:GetService('RunService'))
 local mainInputService = cloneref(game:GetService('UserInputService'))
 local mainTweenService = cloneref(game:GetService('TweenService'))
+local gameCamera = workspace.CurrentCamera
 
 repeat task.wait() until game:IsLoaded()
 
@@ -321,6 +322,8 @@ local Settings = {
     VelocityTargetCheck = false,
     FastBreakEnabled = true,
     FastBreakSpeed = 0.21,
+    NoFallEnabled = true,
+    NoFallMode = "Packet", -- "Packet", "Gravity", "Teleport", "Bounce"
     DebugMode = false, -- for aero to debug shi
 }
 
@@ -676,7 +679,8 @@ local function setupBedwars()
         if combatConstantSuccess and bedwars.Client then
             pcall(function()
                 local remoteNames = {
-                    AttackEntity = bedwars.SwordController.sendServerRequest
+                    AttackEntity = bedwars.SwordController.sendServerRequest,
+                    GroundHit = knit.Controllers.FallDamageController.KnitStart
                 }
 
                 local function dumpRemote(tab)
@@ -1124,6 +1128,10 @@ local HitBoxesEnabled = false
 
 local FastBreakEnabled = false
 
+local NoFallEnabled = false
+local noFallConnections = {}
+local groundHit = nil
+
 local function createHitbox(ent)
     debugPrint(string.format("createHitbox() called for entity: %s", ent.Player and ent.Player.Name or "NPC"), "HITBOX")
     
@@ -1563,6 +1571,135 @@ local function disableFastBreak()
     return success
 end
 
+local function enableNoFall()
+    if NoFallEnabled or not bedwarsLoaded then return false end
+    
+    debugPrint("enableNoFall() called with mode: " .. Settings.NoFallMode, "DEBUG")
+    
+    local success = pcall(function()
+        if not groundHit then
+            task.spawn(function()
+                local attempts = 0
+                while not groundHit and attempts < 100 do
+                    attempts = attempts + 1
+                    pcall(function()
+                        if bedwars.Client and bedwars.Client.Get then
+                            local remoteResult = bedwars.Client:Get(remotes.GroundHit or "GroundHit")
+                            if remoteResult and remoteResult.instance then
+                                groundHit = remoteResult.instance
+                                debugPrint("GroundHit remote found via bedwars.Client:Get", "SUCCESS")
+                            end
+                        end
+                    end)
+                    if not groundHit then
+                        pcall(function()
+                            if knit and knit.Controllers and knit.Controllers.FallDamageController then
+                                groundHit = knit.Controllers.FallDamageController.KnitStart
+                                debugPrint("GroundHit remote found via FallDamageController", "SUCCESS")
+                            end
+                        end)
+                    end
+                    if groundHit then break end
+                    task.wait(0.1)
+                end
+                if not groundHit then
+                    debugPrint("GroundHit remote not found after " .. attempts .. " attempts", "ERROR")
+                end
+            end)
+        end
+        
+        local rayParams = RaycastParams.new()
+        local tracked = 0
+        
+        if Settings.NoFallMode == 'Gravity' then
+            local extraGravity = 0
+            local gravityConnection = mainRunService.PreSimulation:Connect(function(dt)
+                if entitylib.isAlive and entitylib.character.RootPart then
+                    local root = entitylib.character.RootPart
+                    if root.AssemblyLinearVelocity.Y < -85 then
+                        rayParams.FilterDescendantsInstances = {lplr.Character, gameCamera}
+                        rayParams.CollisionGroup = root.CollisionGroup
+
+                        local rootSize = root.Size.Y / 2 + entitylib.character.HipHeight
+                        local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, (tracked * 0.1) - rootSize, 0), rayParams)
+                        if not ray then
+                            root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -86, root.AssemblyLinearVelocity.Z)
+                            root.CFrame += Vector3.new(0, extraGravity * dt, 0)
+                            extraGravity += -workspace.Gravity * dt
+                        end
+                    else
+                        extraGravity = 0
+                    end
+                end
+            end)
+            table.insert(noFallConnections, gravityConnection)
+        else
+            local noFallLoop = task.spawn(function()
+                repeat
+                    if entitylib.isAlive and entitylib.character.RootPart and entitylib.character.Humanoid then
+                        local root = entitylib.character.RootPart
+                        tracked = entitylib.character.Humanoid.FloorMaterial == Enum.Material.Air and math.min(tracked, root.AssemblyLinearVelocity.Y) or 0
+
+                        if tracked < -85 then
+                            if Settings.NoFallMode == 'Packet' and groundHit then
+                                groundHit:FireServer(nil, Vector3.new(0, tracked, 0), workspace:GetServerTimeNow())
+                                debugPrint("NoFall packet sent with velocity: " .. tostring(tracked), "DEBUG")
+                            else
+                                rayParams.FilterDescendantsInstances = {lplr.Character, gameCamera}
+                                rayParams.CollisionGroup = root.CollisionGroup
+
+                                local rootSize = root.Size.Y / 2 + entitylib.character.HipHeight
+                                if Settings.NoFallMode == 'Teleport' then
+                                    local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, -1000, 0), rayParams)
+                                    if ray then
+                                        root.CFrame -= Vector3.new(0, root.Position.Y - (ray.Position.Y + rootSize), 0)
+                                        debugPrint("NoFall teleported to ground", "DEBUG")
+                                    end
+                                else 
+                                    local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, (tracked * 0.1) - rootSize, 0), rayParams)
+                                    if ray then
+                                        tracked = 0
+                                        root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -80, root.AssemblyLinearVelocity.Z)
+                                        debugPrint("NoFall bounced player", "DEBUG")
+                                    end
+                                end
+                            end
+                        end
+                    end
+
+                    task.wait(0.03)
+                until not NoFallEnabled
+            end)
+            table.insert(noFallConnections, {Disconnect = function() task.cancel(noFallLoop) end})
+        end
+        
+        NoFallEnabled = true
+        debugPrint("NoFall enabled successfully with mode: " .. Settings.NoFallMode, "SUCCESS")
+    end)
+    
+    if not success then
+        debugPrint("enableNoFall() failed", "ERROR")
+    end
+    
+    return success
+end
+
+local function disableNoFall()
+    if not NoFallEnabled then return false end
+    
+    debugPrint("disableNoFall() called", "DEBUG")
+    
+    NoFallEnabled = false
+    
+    for _, conn in pairs(noFallConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    noFallConnections = {}
+    
+    debugPrint("NoFall disabled successfully", "SUCCESS")
+    return true
+end
+
 local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
 
@@ -1589,6 +1726,9 @@ local function enableAllFeatures()
     if Settings.FastBreakEnabled then
         enableFastBreak()
     end
+    if Settings.NoFallEnabled then
+        enableNoFall()
+    end
     allFeaturesEnabled = true
 end
 
@@ -1603,6 +1743,7 @@ local function disableAllFeatures()
     disableAutoTool()
     disableVelocity()
     disableFastBreak()
+    disableNoFall()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -1690,6 +1831,13 @@ addCleanupFunction(function()
             task.cancel(fastBreakLoop)
             fastBreakLoop = nil
         end
+        if NoFallEnabled then
+            disableNoFall()
+        end
+        for _, conn in pairs(noFallConnections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        table.clear(noFallConnections)
         for ent, part in pairs(hitboxObjects) do
             if part and part.Parent then
                 part:Destroy()
