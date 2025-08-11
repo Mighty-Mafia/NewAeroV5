@@ -310,14 +310,14 @@ repeat task.wait() until game:IsLoaded()
 local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Player", -- "Sword" or "Player"
-    HitBoxesExpandAmount = 30, 
+    HitBoxesExpandAmount = 45, 
     HitFixEnabled = true,
     InstantPPEnabled = true,
     AutoChargeBowEnabled = false,
     AutoToolEnabled = true,
     VelocityEnabled = true,
-    VelocityHorizontal = 73,
-    VelocityVertical = 73,
+    VelocityHorizontal = 68,
+    VelocityVertical = 68,
     VelocityChance = 100,
     VelocityTargetCheck = false,
     FastBreakEnabled = true,
