@@ -310,14 +310,14 @@ repeat task.wait() until game:IsLoaded()
 local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Player", -- "Sword" or "Player"
-    HitBoxesExpandAmount = 100, 
+    HitBoxesExpandAmount = 70, 
     HitFixEnabled = true,
     InstantPPEnabled = true,
     AutoChargeBowEnabled = false,
     AutoToolEnabled = true,
     VelocityEnabled = true,
-    VelocityHorizontal = 70,
-    VelocityVertical = 70,
+    VelocityHorizontal = 68,
+    VelocityVertical = 68,
     VelocityChance = 100,
     VelocityTargetCheck = false,
     FastBreakEnabled = true,
@@ -970,7 +970,7 @@ local function hookClientGet()
 end
 
 local originalReachDistance = nil
-local REACH_DISTANCE = 30
+local REACH_DISTANCE = 18
 local remotes = {}
 
 local function setupHitFix()
