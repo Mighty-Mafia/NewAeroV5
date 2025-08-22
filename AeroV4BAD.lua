@@ -316,8 +316,8 @@ local Settings = {
     AutoChargeBowEnabled = false,
     AutoToolEnabled = true,
     VelocityEnabled = true,
-    VelocityHorizontal = 68,
-    VelocityVertical = 68,
+    VelocityHorizontal = 75,
+    VelocityVertical = 75,
     VelocityChance = 100,
     VelocityTargetCheck = false,
     FastBreakEnabled = true,
@@ -1071,34 +1071,11 @@ local function enableAutoChargeBow()
             local self, projmeta, worldmeta, origin, shootpos = ...
             
             if projmeta.projectile:find('arrow') then
-                local pos = shootpos or self:getLaunchPosition(origin)
-                if not pos then
-                    return oldCalculateImportantLaunchValues(...)
+                local originalResult = oldCalculateImportantLaunchValues(...)
+                if originalResult then
+                    originalResult.drawDurationSeconds = 5
+                    return originalResult
                 end
-                
-                local meta = projmeta:getProjectileMeta()
-                local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
-                local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
-                local projSpeed = (meta.launchVelocity or 100)
-                local offsetpos = pos + (projmeta.projectile == 'owl_projectile' and Vector3.zero or projmeta.fromPositionOffset)
-                
-                local camera = workspace.CurrentCamera
-                local mouse = lplr:GetMouse()
-                local unitRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
-                
-                local targetPoint = unitRay.Origin + (unitRay.Direction * 1000)
-                local aimDirection = (targetPoint - offsetpos).Unit
-                
-                local newlook = CFrame.new(offsetpos, targetPoint) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
-                local finalDirection = (targetPoint - newlook.Position).Unit
-                
-                return {
-                    initialVelocity = finalDirection * projSpeed,
-                    positionFrom = offsetpos,
-                    deltaT = lifetime,
-                    gravitationalAcceleration = gravity,
-                    drawDurationSeconds = 5
-                }
             end
             
             return oldCalculateImportantLaunchValues(...)
