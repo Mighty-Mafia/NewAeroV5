@@ -306,7 +306,7 @@ local gameCamera = workspace.CurrentCamera
 
 repeat task.wait() until game:IsLoaded()
 
--- Settings (yo can change these values)
+-- Settings (you can change these values)
 local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Player", -- "Sword" or "Player"
@@ -324,6 +324,7 @@ local Settings = {
     FastBreakSpeed = 0.21,
     NoFallEnabled = true,
     NoFallMode = "Packet", -- "Packet", "Gravity", "Teleport", "Bounce"
+    NoSlowdownEnabled = true,
     DebugMode = false, -- for aero to debug shi
 }
 
@@ -1108,6 +1109,8 @@ local FastBreakEnabled = false
 local NoFallEnabled = false
 local noFallConnections = {}
 local groundHit = nil
+local NoSlowdownEnabled = false
+local oldSlowdown = nil
 
 local function createHitbox(ent)
     debugPrint(string.format("createHitbox() called for entity: %s", ent.Player and ent.Player.Name or "NPC"), "HITBOX")
@@ -1677,6 +1680,72 @@ local function disableNoFall()
     return true
 end
 
+local function enableNoSlowdown()
+    if NoSlowdownEnabled or not bedwarsLoaded then return false end
+    
+    debugPrint("enableNoSlowdown() called", "DEBUG")
+    
+    local success = pcall(function()
+        if bedwars.SprintController then
+            local modifier = bedwars.SprintController:getMovementStatusModifier()
+            if modifier then
+                oldSlowdown = modifier.addModifier
+                modifier.addModifier = function(self, tab)
+                    if tab.moveSpeedMultiplier then
+                        tab.moveSpeedMultiplier = math.max(tab.moveSpeedMultiplier, 1)
+                    end
+                    return oldSlowdown(self, tab)
+                end
+
+                for i in modifier.modifiers do
+                    if (i.moveSpeedMultiplier or 1) < 1 then
+                        modifier:removeModifier(i)
+                    end
+                end
+                
+                NoSlowdownEnabled = true
+                debugPrint("NoSlowdown enabled successfully", "SUCCESS")
+            else
+                debugPrint("Movement status modifier not found", "ERROR")
+                return false
+            end
+        else
+            debugPrint("SprintController not found", "ERROR")
+            return false
+        end
+    end)
+    
+    if not success then
+        debugPrint("enableNoSlowdown() failed", "ERROR")
+    end
+    
+    return success
+end
+
+local function disableNoSlowdown()
+    if not NoSlowdownEnabled or not bedwarsLoaded then return false end
+    
+    debugPrint("disableNoSlowdown() called", "DEBUG")
+    
+    local success = pcall(function()
+        if bedwars.SprintController and oldSlowdown then
+            local modifier = bedwars.SprintController:getMovementStatusModifier()
+            if modifier then
+                modifier.addModifier = oldSlowdown
+                oldSlowdown = nil
+                NoSlowdownEnabled = false
+                debugPrint("NoSlowdown disabled successfully", "SUCCESS")
+            end
+        end
+    end)
+    
+    if not success then
+        debugPrint("disableNoSlowdown() failed", "ERROR")
+    end
+    
+    return success
+end
+
 local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
 
@@ -1706,6 +1775,9 @@ local function enableAllFeatures()
     if Settings.NoFallEnabled then
         enableNoFall()
     end
+    if Settings.NoSlowdownEnabled then
+        enableNoSlowdown()
+    end
     allFeaturesEnabled = true
 end
 
@@ -1721,6 +1793,7 @@ local function disableAllFeatures()
     disableVelocity()
     disableFastBreak()
     disableNoFall()
+    disableNoSlowdown()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -1815,6 +1888,9 @@ addCleanupFunction(function()
             pcall(function() conn:Disconnect() end)
         end
         table.clear(noFallConnections)
+        if NoSlowdownEnabled then
+            disableNoSlowdown()
+        end
         for ent, part in pairs(hitboxObjects) do
             if part and part.Parent then
                 part:Destroy()
