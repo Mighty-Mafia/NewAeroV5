@@ -325,6 +325,8 @@ local Settings = {
     NoFallEnabled = true,
     NoFallMode = "Packet", -- "Packet", "Gravity", "Teleport", "Bounce"
     NoSlowdownEnabled = true,
+    GUIEnabled = true,
+    UninjectKeybind = "RightAlt",
     DebugMode = false, -- for aero to debug shi
 }
 
@@ -348,110 +350,65 @@ addCleanupFunction(function()
 end)
 
 local function showNotification(message, duration)
-    duration = duration or 3
-    
+    if not Settings.GUIEnabled then return end  
+    duration = duration or 2.2 
+
     if currentNotification and currentNotification.Parent then
         currentNotification:Destroy()
         currentNotification = nil
     end
-    
+
     local notification = Instance.new("Frame")
-    notification.Size = UDim2.new(0, 380, 0, 70)
-    notification.Position = UDim2.new(0.5, -190, 0, 25)
-    notification.BackgroundColor3 = Color3.fromRGB(20, 22, 25)
+    notification.Size = UDim2.new(0, 300, 0, 55) 
+    notification.Position = UDim2.new(0.5, -150, 0, -80)
+    notification.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
     notification.BorderSizePixel = 0
     notification.AnchorPoint = Vector2.new(0.5, 0)
     notification.Parent = NotificationGui
-    
     currentNotification = notification
 
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
+    corner.CornerRadius = UDim.new(0, 10)
     corner.Parent = notification
 
     local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(70, 130, 255)
-    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(100, 180, 255)
+    stroke.Thickness = 1.6
     stroke.Parent = notification
-    
-    local gradient = Instance.new("UIGradient")
-    gradient.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 27, 30)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 17, 20))
-    }
-    gradient.Rotation = 45
-    gradient.Parent = notification
-
-    local shadow = Instance.new("Frame")
-    shadow.Size = UDim2.new(1, 10, 1, 10)
-    shadow.Position = UDim2.new(0, -5, 0, -5)
-    shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    shadow.BackgroundTransparency = 0.3
-    shadow.ZIndex = notification.ZIndex - 1
-    shadow.Parent = notification
-    
-    local shadowCorner = Instance.new("UICorner")
-    shadowCorner.CornerRadius = UDim.new(0, 12)
-    shadowCorner.Parent = shadow
-
-    local iconFrame = Instance.new("Frame")
-    iconFrame.Size = UDim2.new(0, 50, 1, -10)
-    iconFrame.Position = UDim2.new(0, 5, 0, 5)
-    iconFrame.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
-    iconFrame.BackgroundTransparency = 0.1
-    iconFrame.Parent = notification
-    
-    local iconCorner = Instance.new("UICorner")
-    iconCorner.CornerRadius = UDim.new(0, 8)
-    iconCorner.Parent = iconFrame
-    
-    local iconLabel = Instance.new("TextLabel")
-    iconLabel.Size = UDim2.new(1, 0, 1, 0)
-    iconLabel.BackgroundTransparency = 1
-    iconLabel.Text = "✓"
-    iconLabel.TextColor3 = Color3.new(1, 1, 1)
-    iconLabel.Font = Enum.Font.GothamBold
-    iconLabel.TextSize = 24
-    iconLabel.Parent = iconFrame
 
     local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1, -70, 1, -10)
-    textLabel.Position = UDim2.new(0, 60, 0, 5)
+    textLabel.Size = UDim2.new(1, -20, 1, -10)
+    textLabel.Position = UDim2.new(0, 10, 0, 5)
     textLabel.BackgroundTransparency = 1
     textLabel.TextColor3 = Color3.new(1, 1, 1)
-    textLabel.Font = Enum.Font.GothamSemibold
-    textLabel.TextSize = 14
+    textLabel.Font = Enum.Font.GothamMedium
+    textLabel.TextSize = 15
     textLabel.Text = message
-    textLabel.TextXAlignment = Enum.TextXAlignment.Left
-    textLabel.TextYAlignment = Enum.TextYAlignment.Center
     textLabel.TextWrapped = true
+    textLabel.TextXAlignment = Enum.TextXAlignment.Left
     textLabel.Parent = notification
 
-    notification.Position = UDim2.new(0.5, -190, 0, -80)
-    local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-    local tween = mainTweenService:Create(notification, tweenInfo, {Position = UDim2.new(0.5, -190, 0, 25)})
-    tween:Play()
-    
+    local tweenIn = mainTweenService:Create(notification, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {Position = UDim2.new(0.5, -150, 0, 20)})
+    tweenIn:Play()
+
     task.spawn(function()
         task.wait(duration)
-        
         if currentNotification == notification then
-            local outTweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-            local outTween = mainTweenService:Create(notification, outTweenInfo, {Position = UDim2.new(0.5, -190, 0, -80)})
-            outTween:Play()
-            
-            outTween.Completed:Wait()
-            
+            local tweenOut = mainTweenService:Create(notification, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                {Position = UDim2.new(0.5, -150, 0, -80)})
+            tweenOut:Play()
+            tweenOut.Completed:Wait()
             if notification and notification.Parent then
                 notification:Destroy()
             end
-            
             if currentNotification == notification then
                 currentNotification = nil
             end
         end
     end)
 end
+
 
 local function waitForBedwars()
     local attempts = 0
@@ -1815,6 +1772,25 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
                 showNotification("Script enabled. Press RightShift to disable.", 3)
             end)
         end
+
+    elseif input.KeyCode == Enum.KeyCode[Settings.UninjectKeybind] then
+        if getgenv().VapeScriptInstances then
+            for _, cleanup in pairs(getgenv().VapeScriptInstances) do
+                pcall(cleanup)
+            end
+            getgenv().VapeScriptInstances = nil
+        end
+
+        pcall(function()
+            if NotificationGui then NotificationGui:Destroy() end
+        end)
+
+        if mainInputConnection then
+            mainInputConnection:Disconnect()
+        end
+
+        pcall(function() entitylib.kill() end)
+        pcall(function() script:Destroy() end)
     end
 end)
 
