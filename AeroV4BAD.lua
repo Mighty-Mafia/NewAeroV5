@@ -325,6 +325,7 @@ local Settings = {
     NoFallEnabled = true,
     NoFallMode = "Packet", -- "Packet", "Gravity", "Teleport", "Bounce"
     NoSlowdownEnabled = true,
+    KitESPEnabled = true,
     GUIEnabled = true,
     UninjectKeybind = "RightAlt",
     DebugMode = false, -- for aero to debug shi
@@ -477,7 +478,8 @@ local store = {
     inventories = {},
     matchState = 0,
     queueType = 'bedwars_test',
-    tools = {}
+    tools = {},
+    equippedKit = ''
 }
 local Reach = {}
 local HitBoxes = {}
@@ -696,6 +698,10 @@ local function setupBedwars()
 
         pcall(function()
             local function updateStore(new, old)
+                if new.Bedwars ~= old.Bedwars then
+                    store.equippedKit = new.Bedwars.kit ~= 'none' and new.Bedwars.kit or ''
+                end
+                
                 if new.Inventory ~= old.Inventory then
                     local newinv = (new.Inventory and new.Inventory.observedInventory or {inventory = {}})
                     local oldinv = (old.Inventory and old.Inventory.observedInventory or {inventory = {}})
@@ -740,126 +746,160 @@ local AutoChargeBowEnabled = Settings.AutoChargeBowEnabled
 local oldCalculateImportantLaunchValues = nil
 
 local collectionService = game:GetService("CollectionService")
-local debris = game:GetService("Debris")
-local Icons = {
-    ["iron"] = "rbxassetid://6850537969",
-    ["bee"] = "rbxassetid://7343272839",
-    ["natures_essence_1"] = "rbxassetid://11003449842",
-    ["thorns"] = "rbxassetid://9134549615",
-    ["mushrooms"] = "rbxassetid://9134534696",
-    ["wild_flower"] = "rbxassetid://9134545166",
-    ["crit_star"] = "rbxassetid://9866757805",
-    ["vitality_star"] = "rbxassetid://9866757969"
-}
-local espobjs = {}
-pcall(function()
-    for _, child in pairs(mainPlayersService.LocalPlayer.PlayerGui:GetChildren()) do
-        if child:FindFirstChild("esp_item_") then
-            child:Destroy()
-        end
-    end
-end)
+local KitESPEnabled = false
+local KitESPReference = {}
+local KitESPFolder = Instance.new('Folder')
 
-local espfold = Instance.new("Folder")
-local gui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
-gui.ResetOnSpawn = false
-gui.Name = "VapeESPGui"
-espfold.Parent = gui
+local espgui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
+espgui.ResetOnSpawn = false
+espgui.Name = "VapeKitESPGui"
+KitESPFolder.Parent = espgui
 
-addCleanupFunction(function()
-    if gui and gui.Parent then
-        gui:Destroy()
-    end
-    resetESP()
-end)
+local function getIcon(item)
+    local Icons = {
+        ["alchemist_ingedients"] = "rbxassetid://9134545166",
+        ["wild_flower"] = "rbxassetid://9134545166",
+        ["bee"] = "rbxassetid://7343272839",
+        ["treeOrb"] = "rbxassetid://11003449842",
+        ["natures_essence_1"] = "rbxassetid://11003449842",
+        ["ghost"] = "rbxassetid://9866757805",
+        ["ghost_orb"] = "rbxassetid://9866757805",
+        ["hidden-metal"] = "rbxassetid://6850537969",
+        ["iron"] = "rbxassetid://6850537969",
+        ["SheepModel"] = "rbxassetid://7861268963",
+        ["purple_hay_bale"] = "rbxassetid://7861268963",
+        ["alchemy_crystal"] = "rbxassetid://9134545166",
+        ["stars"] = "rbxassetid://9866757805",
+        ["crit_star"] = "rbxassetid://9866757805"
+    }
+    return Icons[item] or "rbxassetid://9866757805"
+end
 
-local function espadd(v, icon)
-    local billboard = Instance.new("BillboardGui")
-    billboard.Parent = espfold
-    billboard.Name = "esp_item_" .. icon
-    billboard.StudsOffsetWorldSpace = Vector3.new(0, 3, 1.5)
-    billboard.Size = UDim2.new(0, 32, 0, 32)
+local function addBlur(parent)
+    local blur = Instance.new('ImageLabel')
+    blur.Name = 'Blur'
+    blur.Size = UDim2.new(1, 89, 1, 52)
+    blur.Position = UDim2.fromOffset(-48, -31)
+    blur.BackgroundTransparency = 1
+    blur.Image = 'rbxassetid://8560915132'
+    blur.ScaleType = Enum.ScaleType.Slice
+    blur.SliceCenter = Rect.new(52, 31, 261, 502)
+    blur.Parent = parent
+    return blur
+end
+
+local function KitESPAdded(v, icon)
+    if not Settings.KitESPEnabled then return end
+    
+    local billboard = Instance.new('BillboardGui')
+    billboard.Parent = KitESPFolder
+    billboard.Name = icon
+    billboard.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
+    billboard.Size = UDim2.fromOffset(36, 36)
     billboard.AlwaysOnTop = true
+    billboard.ClipsDescendants = false
     billboard.Adornee = v
-    local image = Instance.new("ImageLabel")
+    local blur = addBlur(billboard)
+    blur.Visible = true
+    local image = Instance.new('ImageLabel')
+    image.Size = UDim2.fromOffset(36, 36)
+    image.Position = UDim2.fromScale(0.5, 0.5)
+    image.AnchorPoint = Vector2.new(0.5, 0.5)
+    image.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     image.BackgroundTransparency = 0.5
     image.BorderSizePixel = 0
-    image.Image = Icons[icon] or ""
-    image.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    image.Size = UDim2.new(0, 32, 0, 32)
-    image.AnchorPoint = Vector2.new(0.5, 0.5)
+    image.Image = getIcon(icon)
     image.Parent = billboard
-    local uicorner = Instance.new("UICorner")
+    local uicorner = Instance.new('UICorner')
     uicorner.CornerRadius = UDim.new(0, 4)
     uicorner.Parent = image
-    espobjs[v] = billboard
+    KitESPReference[v] = billboard
 end
 
-local espConnections = {}
-
-local function resetESP()
-    for _, v in pairs(espConnections) do
-        pcall(function() v:Disconnect() end)
+local function KitESPRemoved(v)
+    if KitESPReference[v] then
+        KitESPReference[v]:Destroy()
+        KitESPReference[v] = nil
     end
-    espfold:ClearAllChildren()
-    table.clear(espobjs)
-    espConnections = {}
 end
 
-local function addKit(tag, icon, custom)
-    if not custom then
-        local con1 = collectionService:GetInstanceAddedSignal(tag):Connect(function(v)
-            if v and v.PrimaryPart then
-                espadd(v.PrimaryPart, icon)
-            end
-        end)
-        local con2 = collectionService:GetInstanceRemovedSignal(tag):Connect(function(v)
-            if v and v.PrimaryPart and espobjs[v.PrimaryPart] then
-                espobjs[v.PrimaryPart]:Destroy()
-                espobjs[v.PrimaryPart] = nil
-            end
-        end)
-        table.insert(espConnections, con1)
-        table.insert(espConnections, con2)
-        for _, v in pairs(collectionService:GetTagged(tag)) do
-            if v and v.PrimaryPart then
-                espadd(v.PrimaryPart, icon)
-            end
+local ESPKits = {
+    alchemist = {'alchemist_ingedients', 'wild_flower'},
+    beekeeper = {'bee', 'bee'},
+    bigman = {'treeOrb', 'natures_essence_1'},
+    ghost_catcher = {'ghost', 'ghost_orb'},
+    metal_detector = {'hidden-metal', 'iron'},
+    sheep_herder = {'SheepModel', 'purple_hay_bale'},
+    sorcerer = {'alchemy_crystal', 'wild_flower'},
+    star_collector = {'stars', 'crit_star'}
+}
+
+local kitESPConnections = {}
+
+local function addKitESP(tag, icon)
+    if not Settings.KitESPEnabled then return end
+    
+    local addedConnection = collectionService:GetInstanceAddedSignal(tag):Connect(function(v)
+        if v.PrimaryPart then
+            KitESPAdded(v.PrimaryPart, icon)
         end
-    else
-        local function check(v)
-            if v and v.Name == tag and v.ClassName == "Model" and v.PrimaryPart then
-                espadd(v.PrimaryPart, icon)
-            end
+    end)
+    
+    local removedConnection = collectionService:GetInstanceRemovedSignal(tag):Connect(function(v)
+        if v.PrimaryPart then
+            KitESPRemoved(v.PrimaryPart)
         end
-        local con3 = game.Workspace.ChildAdded:Connect(check)
-        local con4 = game.Workspace.ChildRemoved:Connect(function(v)
-            pcall(function()
-                if v and v.PrimaryPart and espobjs[v.PrimaryPart] then
-                    espobjs[v.PrimaryPart]:Destroy()
-                    espobjs[v.PrimaryPart] = nil
-                end
-            end)
-        end)
-        table.insert(espConnections, con3)
-        table.insert(espConnections, con4)
-        for _, v in pairs(game.Workspace:GetChildren()) do
-            check(v)
+    end)
+    
+    table.insert(kitESPConnections, addedConnection)
+    table.insert(kitESPConnections, removedConnection)
+    
+    for _, v in collectionService:GetTagged(tag) do
+        if v.PrimaryPart then
+            KitESPAdded(v.PrimaryPart, icon)
         end
     end
 end
 
-local function recreateESP()
-    resetESP()
-    addKit("hidden-metal", "iron")
-    addKit("bee", "bee")
-    addKit("treeOrb", "natures_essence_1")
-    addKit("Thorns", "thorns", true)
-    addKit("Mushrooms", "mushrooms", true)
-    addKit("Flower", "wild_flower", true)
-    addKit("CritStar", "crit_star", true)
-    addKit("VitalityStar", "vitality_star", true)
+local function enableKitESP()
+    if KitESPEnabled or not Settings.KitESPEnabled then return end
+    
+    local kit = ESPKits[store.equippedKit]
+    if kit then
+        addKitESP(kit[1], kit[2])
+        KitESPEnabled = true
+        debugPrint("KitESP enabled for kit: " .. store.equippedKit, "DEBUG")
+    end
 end
+
+local function disableKitESP()
+    if not KitESPEnabled then return end
+    
+    for _, conn in pairs(kitESPConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    kitESPConnections = {}
+    
+    KitESPFolder:ClearAllChildren()
+    table.clear(KitESPReference)
+    
+    KitESPEnabled = false
+    debugPrint("KitESP disabled", "DEBUG")
+end
+
+local function recreateKitESP()
+    disableKitESP()
+    if Settings.KitESPEnabled and store.equippedKit ~= '' then
+        enableKitESP()
+    end
+end
+
+addCleanupFunction(function()
+    if espgui and espgui.Parent then
+        espgui:Destroy()
+    end
+    disableKitESP()
+end)
 
 local ProximityPromptService = cloneref(game:GetService('ProximityPromptService'))
 local InstantPPConnection = nil
@@ -1708,7 +1748,9 @@ local allFeaturesEnabled = true
 
 local function enableAllFeatures()
     debugPrint("enableAllFeatures() called", "DEBUG")
-    recreateESP()
+    if Settings.KitESPEnabled then
+        recreateKitESP()
+    end
     if Settings.InstantPPEnabled then
         enableInstantPP()
     end
@@ -1740,7 +1782,7 @@ end
 
 local function disableAllFeatures()
     debugPrint("disableAllFeatures() called", "DEBUG")
-    resetESP()
+    disableKitESP()
     disableInstantPP()
     disableHitboxes()
     disableSprint()
