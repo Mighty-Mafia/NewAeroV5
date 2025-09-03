@@ -556,6 +556,8 @@ local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Player", -- "Sword" or "Player"
     HitBoxesExpandAmount = 70, 
+    HitBoxesEnabled = true, 
+    HitBoxesKeybind = "Z", 
     HitFixEnabled = true,
     InstantPPEnabled = true,
     AutoChargeBowEnabled = false,
@@ -572,6 +574,7 @@ local Settings = {
     NoSlowdownEnabled = true,
     KitESPEnabled = true,
     ProjectileAimbotEnabled = true,
+    ProjectileAimbotKeybind = "Backquote", 
     ProjectileAimbotFOV = 250,
     ProjectileAimbotTargetPart = "RootPart", 
     ProjectileAimbotOtherProjectiles = false,
@@ -580,7 +583,7 @@ local Settings = {
     ProjectileAimbotNPCs = false,
     GUIEnabled = true,
     UninjectKeybind = "RightAlt",
-    DebugMode = true, -- for aero to debug shi
+    DebugMode = false, -- for aero to debug shi
 }
 
 pcall(function()
@@ -2235,7 +2238,9 @@ local function enableAllFeatures()
     if Settings.InstantPPEnabled then
         enableInstantPP()
     end
-    enableHitboxes()
+    if Settings.HitBoxesEnabled then
+        enableHitboxes()
+    end
     enableSprint()
     if Settings.HitFixEnabled then
         enableHitFix()
@@ -2294,6 +2299,36 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
             enableAllFeatures()
             task.spawn(function()
                 showNotification("Script enabled. Press RightShift to disable.", 3)
+            end)
+        end
+
+    elseif input.KeyCode == Enum.KeyCode[Settings.HitBoxesKeybind] then
+        if HitBoxesEnabled then
+            debugPrint("HitBoxes key pressed - Disabling hitboxes", "INPUT")
+            disableHitboxes()
+            task.spawn(function()
+                showNotification("HitBoxes disabled", 2)
+            end)
+        else
+            debugPrint("HitBoxes key pressed - Enabling hitboxes", "INPUT")
+            enableHitboxes()
+            task.spawn(function()
+                showNotification("HitBoxes enabled", 2)
+            end)
+        end
+
+    elseif input.KeyCode == Enum.KeyCode[Settings.ProjectileAimbotKeybind] then
+        if ProjectileAimbotEnabled then
+            debugPrint("ProjectileAimbot key pressed - Disabling projectile aimbot", "INPUT")
+            disableProjectileAimbot()
+            task.spawn(function()
+                showNotification("Projectile Aimbot disabled", 2)
+            end)
+        else
+            debugPrint("ProjectileAimbot key pressed - Enabling projectile aimbot", "INPUT")
+            enableProjectileAimbot()
+            task.spawn(function()
+                showNotification("Projectile Aimbot enabled", 2)
             end)
         end
 
