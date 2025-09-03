@@ -93,6 +93,10 @@ local function waitForChildOfType(obj, name, timeout, prop)
 	return returned
 end
 
+entitylib.isVulnerable = function(ent)
+    return ent.Health > 0 and not ent.Character:FindFirstChildWhichIsA('ForceField')
+end
+
 entitylib.targetCheck = function(ent)
 	if ent.TeamCheck then
 		return ent:TeamCheck()
@@ -102,6 +106,30 @@ entitylib.targetCheck = function(ent)
 	if not ent.Player.Team then return true end
 	if ent.Player.Team ~= lplr.Team then return true end
 	return #ent.Player.Team:GetPlayers() == #playersService:GetPlayers()
+end
+
+entitylib.IgnoreObject = RaycastParams.new()
+entitylib.IgnoreObject.RespectCanCollide = true
+
+entitylib.Wallcheck = function(origin, position, ignoreobject)
+    if typeof(ignoreobject) ~= 'Instance' then
+        local ignorelist = {gameCamera, lplr.Character}
+        for _, v in entitylib.List do
+            if v.Targetable then
+                table.insert(ignorelist, v.Character)
+            end
+        end
+
+        if typeof(ignoreobject) == 'table' then
+            for _, v in ignoreobject do
+                table.insert(ignorelist, v)
+            end
+        end
+
+        ignoreobject = entitylib.IgnoreObject
+        ignoreobject.FilterDescendantsInstances = ignorelist
+    end
+    return workspace:Raycast(origin, (position - origin), ignoreobject)
 end
 
 entitylib.getUpdateConnections = function(ent)
@@ -297,12 +325,229 @@ entitylib.kill = function()
 	end
 end
 
+local prediction = {
+    SolveTrajectory = function(origin, projectileSpeed, gravity, targetPos, targetVelocity, playerGravity, playerHeight, playerJump, params)
+        local eps = 1e-9
+        local function isZero(d)
+            return (d > -eps and d < eps)
+        end
+
+        local function cuberoot(x)
+            return (x > 0) and math.pow(x, (1 / 3)) or -math.pow(math.abs(x), (1 / 3))
+        end
+
+        local function solveQuadric(c0, c1, c2)
+            local s0, s1
+            local p, q, D
+
+            p = c1 / (2 * c0)
+            q = c2 / c0
+            D = p * p - q
+
+            if isZero(D) then
+                s0 = -p
+                return s0
+            elseif (D < 0) then
+                return
+            else
+                local sqrt_D = math.sqrt(D)
+                s0 = sqrt_D - p
+                s1 = -sqrt_D - p
+                return s0, s1
+            end
+        end
+
+        local function solveCubic(c0, c1, c2, c3)
+            local s0, s1, s2
+            local num, sub
+            local A, B, C
+            local sq_A, p, q
+            local cb_p, D
+
+            A = c1 / c0
+            B = c2 / c0
+            C = c3 / c0
+
+            sq_A = A * A
+            p = (1 / 3) * (-(1 / 3) * sq_A + B)
+            q = 0.5 * ((2 / 27) * A * sq_A - (1 / 3) * A * B + C)
+
+            cb_p = p * p * p
+            D = q * q + cb_p
+
+            if isZero(D) then
+                if isZero(q) then
+                    s0 = 0
+                    num = 1
+                else
+                    local u = cuberoot(-q)
+                    s0 = 2 * u
+                    s1 = -u
+                    num = 2
+                end
+            elseif (D < 0) then
+                local phi = (1 / 3) * math.acos(-q / math.sqrt(-cb_p))
+                local t = 2 * math.sqrt(-p)
+                s0 = t * math.cos(phi)
+                s1 = -t * math.cos(phi + math.pi / 3)
+                s2 = -t * math.cos(phi - math.pi / 3)
+                num = 3
+            else
+                local sqrt_D = math.sqrt(D)
+                local u = cuberoot(sqrt_D - q)
+                local v = -cuberoot(sqrt_D + q)
+                s0 = u + v
+                num = 1
+            end
+
+            sub = (1 / 3) * A
+            if (num > 0) then s0 = s0 - sub end
+            if (num > 1) then s1 = s1 - sub end
+            if (num > 2) then s2 = s2 - sub end
+
+            return s0, s1, s2
+        end
+
+        local function solveQuartic(c0, c1, c2, c3, c4)
+            local s0, s1, s2, s3
+            local coeffs = {}
+            local z, u, v, sub
+            local A, B, C, D
+            local sq_A, p, q, r
+            local num
+
+            A = c1 / c0
+            B = c2 / c0
+            C = c3 / c0
+            D = c4 / c0
+
+            sq_A = A * A
+            p = -0.375 * sq_A + B
+            q = 0.125 * sq_A * A - 0.5 * A * B + C
+            r = -(3 / 256) * sq_A * sq_A + 0.0625 * sq_A * B - 0.25 * A * C + D
+
+            if isZero(r) then
+                coeffs[3] = q
+                coeffs[2] = p
+                coeffs[1] = 0
+                coeffs[0] = 1
+
+                local results = {solveCubic(coeffs[0], coeffs[1], coeffs[2], coeffs[3])}
+                num = #results
+                s0, s1, s2 = results[1], results[2], results[3]
+            else
+                coeffs[3] = 0.5 * r * p - 0.125 * q * q
+                coeffs[2] = -r
+                coeffs[1] = -0.5 * p
+                coeffs[0] = 1
+
+                s0, s1, s2 = solveCubic(coeffs[0], coeffs[1], coeffs[2], coeffs[3])
+                z = s0
+
+                u = z * z - r
+                v = 2 * z - p
+
+                if isZero(u) then
+                    u = 0
+                elseif (u > 0) then
+                    u = math.sqrt(u)
+                else
+                    return
+                end
+                if isZero(v) then
+                    v = 0
+                elseif (v > 0) then
+                    v = math.sqrt(v)
+                else
+                    return
+                end
+
+                coeffs[2] = z - u
+                coeffs[1] = q < 0 and -v or v
+                coeffs[0] = 1
+
+                do
+                    local results = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
+                    num = #results
+                    s0, s1 = results[1], results[2]
+                end
+
+                coeffs[2] = z + u
+                coeffs[1] = q < 0 and v or -v
+                coeffs[0] = 1
+
+                if (num == 0) then
+                    local results = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
+                    num = num + #results
+                    s0, s1 = results[1], results[2]
+                end
+                if (num == 1) then
+                    local results = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
+                    num = num + #results
+                    s1, s2 = results[1], results[2]
+                end
+                if (num == 2) then
+                    local results = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
+                    num = num + #results
+                    s2, s3 = results[1], results[2]
+                end
+            end
+
+            sub = 0.25 * A
+            if (num > 0) then s0 = s0 - sub end
+            if (num > 1) then s1 = s1 - sub end
+            if (num > 2) then s2 = s2 - sub end
+            if (num > 3) then s3 = s3 - sub end
+
+            return {s3, s2, s1, s0}
+        end
+
+        local disp = targetPos - origin
+        local p, q, r = targetVelocity.X, targetVelocity.Y, targetVelocity.Z
+        local h, j, k = disp.X, disp.Y, disp.Z
+        local l = -.5 * gravity
+
+        local solutions = solveQuartic(
+            l*l,
+            -2*q*l,
+            q*q - 2*j*l - projectileSpeed*projectileSpeed + p*p + r*r,
+            2*j*q + 2*h*p + 2*k*r,
+            j*j + h*h + k*k
+        )
+        
+        if solutions then
+            local posRoots = {}
+            for _, v in solutions do
+                if v > 0 then
+                    table.insert(posRoots, v)
+                end
+            end
+            table.sort(posRoots)
+
+            if posRoots[1] then
+                local t = posRoots[1]
+                local dx = h + p * t
+                local dy = j + q * t - l * t * t
+                local dz = k + r * t
+                return origin + Vector3.new(dx, dy, dz)
+            end
+        elseif gravity == 0 then
+            local t = (disp.Magnitude / projectileSpeed)
+            local dx = h + p * t
+            local dy = j + q * t - l * t * t
+            local dz = k + r * t
+            return origin + Vector3.new(dx, dy, dz)
+        end
+    end
+}
+
 local mainPlayersService = cloneref(game:GetService('Players'))
 local mainReplicatedStorage = cloneref(game:GetService('ReplicatedStorage'))
 local mainRunService = cloneref(game:GetService('RunService'))
 local mainInputService = cloneref(game:GetService('UserInputService'))
 local mainTweenService = cloneref(game:GetService('TweenService'))
 local gameCamera = workspace.CurrentCamera
+local collectionService = cloneref(game:GetService('CollectionService'))
 
 repeat task.wait() until game:IsLoaded()
 
@@ -326,9 +571,16 @@ local Settings = {
     NoFallMode = "Packet", -- "Packet", "Gravity", "Teleport", "Bounce"
     NoSlowdownEnabled = true,
     KitESPEnabled = true,
+    ProjectileAimbotEnabled = true,
+    ProjectileAimbotFOV = 1000,
+    ProjectileAimbotTargetPart = "RootPart", 
+    ProjectileAimbotOtherProjectiles = true,
+    ProjectileAimbotPlayers = true,
+    ProjectileAimbotWalls = true,
+    ProjectileAimbotNPCs = false,
     GUIEnabled = true,
     UninjectKeybind = "RightAlt",
-    DebugMode = false, -- for aero to debug shi
+    DebugMode = true, -- for aero to debug shi
 }
 
 pcall(function()
@@ -533,6 +785,54 @@ local function hotbarSwitch(slot)
     return false
 end
 
+local function entityMouse(options)
+    options = options or {}
+    local mouseLocation = options.MouseOrigin or getMousePosition()
+    local sortingTable = {}
+    
+    if not entitylib.isAlive then 
+        return nil 
+    end
+    
+    for _, v in entitylib.List do
+        if not options.Players and v.Player then continue end
+        if not options.NPCs and v.NPC then continue end
+        if not v.Targetable then continue end
+        
+        local position, vis = gameCamera:WorldToViewportPoint(v[options.Part].Position)
+        if not vis then continue end
+        
+        local mag = (mouseLocation - Vector2.new(position.x, position.y)).Magnitude
+        if mag > options.Range then continue end
+        
+        if entitylib.isVulnerable(v) then
+            table.insert(sortingTable, {
+                Entity = v,
+                Magnitude = v.Target and -1 or mag
+            })
+        end
+    end
+
+    table.sort(sortingTable, options.Sort or function(a, b)
+        return a.Magnitude < b.Magnitude
+    end)
+
+    for _, v in sortingTable do
+        if options.Wallcheck then
+            if entitylib.Wallcheck(options.Origin or entitylib.character.HumanoidRootPart.Position, v.Entity[options.Part].Position, options.Wallcheck) then 
+                continue 
+            end
+        end
+        table.clear(options)
+        table.clear(sortingTable)
+        return v.Entity
+    end
+    
+    table.clear(sortingTable)
+    table.clear(options)
+    return nil
+end
+
 local function entityPosition(options)
     options = options or {}
     local range = options.Range or 50
@@ -597,6 +897,25 @@ local function setupBedwars()
         bedwars.ProjectileController = knit.Controllers.ProjectileController
         bedwars.QueryUtil = require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil or workspace
         bedwars.BowConstantsTable = debug.getupvalue(knit.Controllers.ProjectileController.enableBeam, 8)
+        pcall(function()
+            local projectileMetaFunc = debug.getupvalue(knit.Controllers.ProjectileController.launchProjectileWithValues, 2)
+            if projectileMetaFunc then
+                bedwars.ProjectileMeta = debug.getupvalue(projectileMetaFunc, 1)
+                debugPrint("ProjectileMeta loaded successfully", "DEBUG")
+            end
+        end)
+
+        if bedwars.ProjectileMeta then
+            debug.setmetatable({}, {
+                __index = function(self, key)
+                    if key == "getProjectileMeta" then
+                        return function()
+                            return bedwars.ProjectileMeta
+                        end
+                    end
+                end
+            })
+        end
         bedwars.ItemMeta = debug.getupvalue(require(mainReplicatedStorage.TS.item['item-meta']).getItemMeta, 1)
         bedwars.Store = require(lplr.PlayerScripts.TS.ui.store).ClientStore
         bedwars.BlockBreaker = knit.Controllers.BlockBreakController.blockBreaker
@@ -1102,6 +1421,17 @@ local hitboxConnections = {}
 local HitBoxesEnabled = false
 
 local FastBreakEnabled = false
+
+local ProjectileAimbotEnabled = false
+local oldCalculateImportantLaunchValues = nil
+local ProjectileAimbotSettings = {
+    FOV = Settings.ProjectileAimbotFOV,
+    TargetPart = Settings.ProjectileAimbotTargetPart,
+    OtherProjectiles = Settings.ProjectileAimbotOtherProjectiles,
+    Players = Settings.ProjectileAimbotPlayers,
+    Walls = Settings.ProjectileAimbotWalls,
+    NPCs = Settings.ProjectileAimbotNPCs
+}
 
 local NoFallEnabled = false
 local noFallConnections = {}
@@ -1743,11 +2073,162 @@ local function disableNoSlowdown()
     return success
 end
 
+local function enableProjectileAimbot()
+    if ProjectileAimbotEnabled or not bedwarsLoaded or not bedwars.ProjectileController then
+        debugPrint("enableProjectileAimbot() failed: prerequisites not met", "ERROR")
+        return false
+    end
+
+    debugPrint("enableProjectileAimbot() called", "DEBUG")
+
+    local success = pcall(function()
+        if not oldCalculateImportantLaunchValues then
+            oldCalculateImportantLaunchValues = bedwars.ProjectileController.calculateImportantLaunchValues
+            debugPrint("Stored original calculateImportantLaunchValues function", "DEBUG")
+        end
+
+        bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
+            local self, projmeta, worldmeta, origin, shootpos = ...
+
+            debugPrint("Projectile aimbot calculating launch values", "PROJECTILE")
+
+            local plr = entityMouse({
+                Part = ProjectileAimbotSettings.TargetPart,
+                Range = ProjectileAimbotSettings.FOV,
+                Players = ProjectileAimbotSettings.Players,
+                NPCs = ProjectileAimbotSettings.NPCs,
+                Wallcheck = ProjectileAimbotSettings.Walls,
+                Origin = entitylib.isAlive and (shootpos or entitylib.character.RootPart.Position) or Vector3.zero
+            })
+
+            if plr then
+                debugPrint("Target found: " .. (plr.Player and plr.Player.Name or "NPC"), "PROJECTILE")
+
+                local pos = shootpos or (self.getLaunchPosition and self:getLaunchPosition(origin) or origin)
+                if not pos then
+                    debugPrint("No launch position found", "PROJECTILE")
+                    return oldCalculateImportantLaunchValues(...)
+                end
+
+                if (not ProjectileAimbotSettings.OtherProjectiles) and not projmeta.projectile:find('arrow') then
+                    debugPrint("Other projectiles disabled and not arrow", "PROJECTILE")
+                    return oldCalculateImportantLaunchValues(...)
+                end
+
+                local meta = projmeta:getProjectileMeta() or {}
+                if not meta.predictionLifetimeSec then
+                    meta = {
+                        predictionLifetimeSec = 3,
+                        lifetimeSec = 3,
+                        gravitationalAcceleration = 196.2,
+                        launchVelocity = 100
+                    }
+                end
+
+                local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
+                local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
+                local projSpeed = (meta.launchVelocity or 100)
+                local offsetpos = pos + (projmeta.projectile == 'owl_projectile' and Vector3.zero or projmeta.fromPositionOffset)
+
+                debugPrint("Projectile speed: " .. projSpeed .. ", Gravity: " .. gravity, "PROJECTILE")
+
+                local targetLook = CFrame.new(offsetpos, plr[ProjectileAimbotSettings.TargetPart].Position)
+                local targetPos = plr[ProjectileAimbotSettings.TargetPart].Position
+                local targetVel = projmeta.projectile == 'telepearl' and Vector3.zero or plr[ProjectileAimbotSettings.TargetPart].Velocity
+
+                debugPrint("Target position: " .. tostring(targetPos), "PROJECTILE")
+
+                local calc = prediction.SolveTrajectory(
+                    targetLook.p,
+                    projSpeed,
+                    gravity,
+                    targetPos,
+                    targetVel,
+                    workspace.Gravity,  
+                    plr.HipHeight,
+                    plr.Jumping and 50 or nil  
+                )
+
+                debugPrint("Trajectory calculation result: " .. tostring(calc), "PROJECTILE")
+
+                if calc then
+                    debugPrint("Projectile aimbot target acquired!", "PROJECTILE")
+                    return {
+                        initialVelocity = CFrame.new(targetLook.Position, calc).LookVector * projSpeed,
+                        positionFrom = offsetpos,
+                        deltaT = lifetime,
+                        gravitationalAcceleration = gravity,
+                        drawDurationSeconds = 5
+                    }
+                else
+                    debugPrint("Trajectory calculation failed", "PROJECTILE")
+                end
+            else
+                debugPrint("No target found", "PROJECTILE")
+            end
+
+            return oldCalculateImportantLaunchValues(...)
+        end
+
+        ProjectileAimbotEnabled = true
+        debugPrint("Projectile aimbot enabled successfully", "SUCCESS")
+    end)
+
+    if not success then
+        debugPrint("enableProjectileAimbot() failed: " .. tostring(success), "ERROR")
+    end
+
+    return success
+end
+
+local function disableProjectileAimbot()
+    if not ProjectileAimbotEnabled or not bedwarsLoaded or not bedwars.ProjectileController then 
+        debugPrint("disableProjectileAimbot() failed: not enabled or prerequisites not met", "ERROR")
+        return false 
+    end
+    
+    debugPrint("disableProjectileAimbot() called", "DEBUG")
+    
+    local success = pcall(function()
+        if oldCalculateImportantLaunchValues then
+            bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
+            oldCalculateImportantLaunchValues = nil
+            ProjectileAimbotEnabled = false
+            debugPrint("Projectile aimbot disabled successfully", "SUCCESS")
+        end
+    end)
+    
+    if not success then
+        debugPrint("disableProjectileAimbot() failed: " .. tostring(success), "ERROR")
+    end
+    
+    return success
+end
+
 local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
 
 local function enableAllFeatures()
     debugPrint("enableAllFeatures() called", "DEBUG")
+    debugPrint("Projectile Aimbot Settings:", "DEBUG")
+    debugPrint("  FOV: " .. Settings.ProjectileAimbotFOV, "DEBUG")
+    debugPrint("  TargetPart: " .. Settings.ProjectileAimbotTargetPart, "DEBUG")
+    debugPrint("  OtherProjectiles: " .. tostring(Settings.ProjectileAimbotOtherProjectiles), "DEBUG")
+    debugPrint("  Players: " .. tostring(Settings.ProjectileAimbotPlayers), "DEBUG")
+    debugPrint("  Walls: " .. tostring(Settings.ProjectileAimbotWalls), "DEBUG")
+    debugPrint("  NPCs: " .. tostring(Settings.ProjectileAimbotNPCs), "DEBUG")
+    
+    ProjectileAimbotSettings.FOV = Settings.ProjectileAimbotFOV
+    ProjectileAimbotSettings.TargetPart = Settings.ProjectileAimbotTargetPart
+    ProjectileAimbotSettings.OtherProjectiles = Settings.ProjectileAimbotOtherProjectiles
+    ProjectileAimbotSettings.Players = Settings.ProjectileAimbotPlayers
+    ProjectileAimbotSettings.Walls = Settings.ProjectileAimbotWalls
+    ProjectileAimbotSettings.NPCs = Settings.ProjectileAimbotNPCs
+    
+    if Settings.ProjectileAimbotEnabled then
+        enableProjectileAimbot()
+    end
+    
     if Settings.KitESPEnabled then
         recreateKitESP()
     end
@@ -1783,6 +2264,7 @@ end
 local function disableAllFeatures()
     debugPrint("disableAllFeatures() called", "DEBUG")
     disableKitESP()
+    disableProjectileAimbot()
     disableInstantPP()
     disableHitboxes()
     disableSprint()
@@ -1877,8 +2359,10 @@ addCleanupFunction(function()
                 end
             end
         end
-        if oldCalculateImportantLaunchValues and bedwars.ProjectileController then
-            bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
+        if oldCalculateImportantLaunchValues and bedwars and bedwars.ProjectileController then
+            pcall(function()
+                bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
+            end)
         end
         if originalReachDistance ~= nil and bedwars and bedwars.CombatConstant then
             bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = originalReachDistance
