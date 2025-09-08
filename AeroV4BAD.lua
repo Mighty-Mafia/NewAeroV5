@@ -877,91 +877,48 @@ end
 
 local function entityPosition(options)
     options = options or {}
-    local optimalReach = getOptimalReachDistance()
-    local range = options.Range or optimalReach * 50
+    local range = options.Range or 50
     local part = options.Part or 'RootPart'
     local players = options.Players
     
+    debugPrint(string.format("entityPosition() called - Range: %d, Part: %s, Players: %s", 
+        range, part, tostring(players)), "ENTITY")
+    
     if not entitylib.isAlive then 
+        debugPrint("entityPosition() failed: player not alive", "ENTITY")
         return nil 
     end
     
     local localPos = entitylib.character.RootPart.Position
+    local entityCount = 0
+    local targetableCount = 0
     local closest = nil
     local closestDistance = range
     
     for _, entity in pairs(entitylib.List) do
+        entityCount = entityCount + 1
         if entity.Targetable and entity[part] then
+            targetableCount = targetableCount + 1
             local distance = (localPos - entity[part].Position).Magnitude
+            debugPrint(string.format("Found entity at distance: %.2f (range: %d)", distance, range), "ENTITY")
             
             if distance <= closestDistance then
                 if players and entity.Player then
                     closest = entity
                     closestDistance = distance
+                    debugPrint(string.format("entityPosition() found closer player target: %s at %.2f", entity.Player.Name, distance), "ENTITY")
                 elseif not players then
                     closest = entity
                     closestDistance = distance
+                    debugPrint("entityPosition() found closer non-player target", "ENTITY")
                 end
             end
         end
     end
     
+    debugPrint(string.format("entityPosition() result - Total entities: %d, Targetable: %d, Found: %s", 
+        entityCount, targetableCount, closest and "YES" or "NO"), "ENTITY")
     return closest
-end
-
-local function improvedEntityMouse(options)
-    options = options or {}
-    local mouseLocation = options.MouseOrigin or getMousePosition()
-    local sortingTable = {}
-    
-    if not entitylib.isAlive then 
-        return nil 
-    end
-    
-    local optimalReach = getOptimalReachDistance()
-    local range = options.Range or optimalReach * 50
-    
-    for _, v in entitylib.List do
-        if not options.Players and v.Player then continue end
-        if not options.NPCs and v.NPC then continue end
-        if not v.Targetable then continue end
-        
-        local position, vis = gameCamera:WorldToViewportPoint(v[options.Part].Position)
-        if not vis then continue end
-        
-        local mag = (mouseLocation - Vector2.new(position.x, position.y)).Magnitude
-        if mag > range then continue end
-        
-        if entitylib.isVulnerable(v) then
-            local distanceToPlayer = (entitylib.character.RootPart.Position - v[options.Part].Position).Magnitude
-            local reachScore = optimalReach * 50 - distanceToPlayer
-            
-            table.insert(sortingTable, {
-                Entity = v,
-                Magnitude = mag,
-                Distance = distanceToPlayer,
-                ReachScore = reachScore
-            })
-        end
-    end
-
-    table.sort(sortingTable, function(a, b)
-        if math.abs(a.ReachScore - b.ReachScore) < 5 then
-            return a.Magnitude < b.Magnitude
-        end
-        return a.ReachScore > b.ReachScore
-    end)
-
-    for _, v in sortingTable do
-        if options.Wallcheck then
-            if entitylib.Wallcheck(options.Origin or entitylib.character.HumanoidRootPart.Position, v.Entity[options.Part].Position, options.Wallcheck) then 
-                continue 
-            end
-        end
-        return v.Entity
-    end
-    
-    return nil
 end
 
 local function setupBedwars()
@@ -1348,7 +1305,7 @@ local function hookClientGet()
             return {
                 instance = call.instance,
                 SendToServer = function(_, attackTable, ...)
-                    if attackTable and attackTable.validate and HitFixEnabled then
+                    if attackTable and attackTable.validate then
                         local selfpos = attackTable.validate.selfPosition and attackTable.validate.selfPosition.value
                         local targetpos = attackTable.validate.targetPosition and attackTable.validate.targetPosition.value
                         
@@ -1356,10 +1313,7 @@ local function hookClientGet()
                             store.attackReach = ((selfpos - targetpos).Magnitude * 100) // 1 / 100
                             store.attackReachUpdate = tick() + 1
                             
-                            local optimalReach = getOptimalReachDistance()
-                            local distance = (selfpos - targetpos).Magnitude
-                            
-                            if distance > optimalReach - 2 and distance < optimalReach + 2 then
+                            if HitFixEnabled then
                                 attackTable.validate.raycast = attackTable.validate.raycast or {}
                                 attackTable.validate.selfPosition.value = selfpos + CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
                             end
@@ -1372,26 +1326,6 @@ local function hookClientGet()
         
         return call
     end
-end
-
-local function getOptimalReachDistance()
-    if not entitylib.isAlive then return 14 end
-    
-    local baseReach = 14
-    local sword, _ = getSword()
-    
-    if sword then
-        local swordMeta = bedwars.ItemMeta[sword.itemType].sword
-        if swordMeta and swordMeta.range then
-            baseReach = swordMeta.range
-        end
-    end
-    
-    if HitBoxesEnabled and Settings.HitBoxesMode == 'Player' then
-        baseReach = baseReach + (Settings.HitBoxesExpandAmount / 20)
-    end
-    
-    return math.min(baseReach, 18)
 end
 
 local originalReachDistance = nil
@@ -1431,7 +1365,7 @@ local function setupHitFix()
         local success = pcall(function()
             if swordController and swordController.swingSwordAtMouse then
                 debug.setconstant(swordController.swingSwordAtMouse, 23, enabled and 'raycast' or 'Raycast')
-                debug.setupvalue(swingSwordAtMouse, 4, enabled and bedwars.QueryUtil or workspace)
+                debug.setupvalue(swordController.swingSwordAtMouse, 4, enabled and bedwars.QueryUtil or workspace)
             end
         end)
         return success
@@ -1465,6 +1399,7 @@ local function setupHitFix()
     local hookSuccess = pcall(function() applyFunctionHook(HitFixEnabled) end)
     local debugSuccess = applyDebugPatch(HitFixEnabled)
     local reachSuccess = applyReach(HitFixEnabled)
+
 
     return hookSuccess and reachSuccess
 end
@@ -1547,6 +1482,8 @@ local NoSlowdownEnabled = false
 local oldSlowdown = nil
 
 local function createHitbox(ent)
+    debugPrint(string.format("createHitbox() called for entity: %s", ent.Player and ent.Player.Name or "NPC"), "HITBOX")
+    
     if ent.Targetable and ent.Player then
         local success = pcall(function()
             local hitbox = Instance.new('Part')
@@ -1563,7 +1500,12 @@ local function createHitbox(ent)
             weld.Parent = hitbox
             
             hitboxObjects[ent] = hitbox
+            debugPrint(string.format("Created hitbox for %s with size: %s", ent.Player.Name, tostring(hitbox.Size)), "HITBOX")
         end)
+        
+        if not success then
+            debugPrint(string.format("Failed to create hitbox for %s", ent.Player and ent.Player.Name or "unknown"), "HITBOX")
+        end
     end
 end
 
@@ -1577,10 +1519,12 @@ end
 
 local function applySwordHitbox(enabled)
     if not bedwarsLoaded or not bedwars or not bedwars.SwordController then
+        debugPrint("applySwordHitbox() failed: bedwars not loaded or SwordController missing", "HITBOX")
         return false
     end
     
     if not bedwars.SwordController.swingSwordInRegion then
+        debugPrint("applySwordHitbox() failed: swingSwordInRegion function not found", "HITBOX")
         return false
     end
     
@@ -1588,11 +1532,17 @@ local function applySwordHitbox(enabled)
         if enabled then
             debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (Settings.HitBoxesExpandAmount / 3))
             hitboxSet = true
+            debugPrint(string.format("Applied sword hitbox with range: %.2f", Settings.HitBoxesExpandAmount / 3), "HITBOX")
         else
             debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
             hitboxSet = nil
+            debugPrint("Removed sword hitbox, restored to 3.8", "HITBOX")
         end
     end)
+    
+    if not success then
+        debugPrint("applySwordHitbox() failed to modify swingSwordInRegion: " .. tostring(errorMsg), "HITBOX")
+    end
     
     return success
 end
@@ -1607,16 +1557,21 @@ local function updatePlayerHitboxes()
 end
 
 local function enableHitboxes()
+    debugPrint(string.format("enableHitboxes() called - Mode: %s, Expand: %.2f", Settings.HitBoxesMode, Settings.HitBoxesExpandAmount), "HITBOX")
+    
     if not entitylib.Running then
         entitylib.start()
+        debugPrint("Started entitylib for hitboxes", "HITBOX")
     end
     
     if Settings.HitBoxesMode == 'Sword' then
         local success = applySwordHitbox(true)
         if success then
             HitBoxesEnabled = true
+            debugPrint("Sword hitboxes enabled successfully", "HITBOX")
             return true
         else
+            debugPrint("Failed to enable sword hitboxes", "HITBOX")
             return false
         end
     else 
@@ -1632,6 +1587,7 @@ local function enableHitboxes()
         end
         
         HitBoxesEnabled = true
+        debugPrint(string.format("Player hitboxes enabled successfully - Created %d hitboxes", #hitboxObjects), "HITBOX")
         return true
     end
 end
@@ -2176,7 +2132,7 @@ local function enableProjectileAimbot()
         bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
             local self, projmeta, worldmeta, origin, shootpos = ...
             
-            local plr = improvedEntityMouse({
+            local plr = entityMouse({
                 Part = ProjectileAimbotSettings.TargetPart,
                 Range = ProjectileAimbotSettings.FOV,
                 Players = ProjectileAimbotSettings.Players,
@@ -2278,6 +2234,32 @@ local function enableProjectileAimbot()
         debugPrint("enableProjectileAimbot() failed: " .. tostring(success), "ERROR")
     end
 
+    return success
+end
+
+local function disableProjectileAimbot()
+    if not ProjectileAimbotEnabled or not bedwarsLoaded or not bedwars.ProjectileController then 
+        debugPrint("disableProjectileAimbot() failed: prerequisites not met", "ERROR")
+        return false 
+    end
+
+    debugPrint("disableProjectileAimbot() called", "DEBUG")
+    
+    local success = pcall(function()
+        if oldCalculateImportantLaunchValues then
+            bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
+            oldCalculateImportantLaunchValues = nil
+            ProjectileAimbotEnabled = false
+            debugPrint("Projectile aimbot disabled successfully", "SUCCESS")
+        else
+            debugPrint("No original function stored to restore", "ERROR")
+        end
+    end)
+    
+    if not success then
+        debugPrint("disableProjectileAimbot() failed", "ERROR")
+    end
+    
     return success
 end
 
