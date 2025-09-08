@@ -32,6 +32,10 @@ local vapeEvents = setmetatable({}, {
 	end
 })
 
+local rayCheck = RaycastParams.new()
+rayCheck.FilterType = Enum.RaycastFilterType.Include
+rayCheck.FilterDescendantsInstances = {workspace:FindFirstChild('Map')}
+
 local entitylib = {
 	isAlive = false,
 	character = {},
@@ -2176,39 +2180,17 @@ local function enableProjectileAimbot()
                     end
                 end
 
-                local newlook = CFrame.new(offsetpos, plr[ProjectileAimbotSettings.TargetPart].Position) 
-                if projmeta.projectile ~= 'owl_projectile' and bedwars.BowConstantsTable then
-                    newlook = newlook * CFrame.new(Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
-                end
-                
-                local targetVelocity = projmeta.projectile == 'telepearl' and Vector3.zero or plr[ProjectileAimbotSettings.TargetPart].Velocity
-                
-                if targetVelocity.Magnitude > 5 then 
-                    local movementDirection = targetVelocity.Unit
-                    local movementSpeed = targetVelocity.Magnitude
-                    local timeToTarget = (plr[ProjectileAimbotSettings.TargetPart].Position - offsetpos).Magnitude / projSpeed
-                    
-                    targetVelocity = targetVelocity + (movementDirection * movementSpeed * 0.3 * timeToTarget)
-                end
-                
-                local playerJump = nil
-                if plr.Humanoid then
-                    if plr.Humanoid:GetState() == Enum.HumanoidStateType.Jumping then
-                        playerJump = 42.6 
-                    elseif targetVelocity.Y > 5 then 
-                        playerJump = targetVelocity.Y * 1.2
-                    end
-                end
+                local newlook = CFrame.new(offsetpos, plr[ProjectileAimbotSettings.TargetPart].Position) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
                 
                 local calc = prediction.SolveTrajectory(
                     newlook.p, 
                     projSpeed, 
                     gravity, 
                     plr[ProjectileAimbotSettings.TargetPart].Position, 
-                    targetVelocity, 
+                    projmeta.projectile == 'telepearl' and Vector3.zero or plr[ProjectileAimbotSettings.TargetPart].Velocity, 
                     playerGravity, 
                     plr.HipHeight, 
-                    playerJump
+                    plr.Jumping and 42.6 or nil
                 )
                 
                 if calc then
