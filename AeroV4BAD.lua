@@ -328,6 +328,7 @@ end
 local prediction = {
     SolveTrajectory = function(origin, projectileSpeed, gravity, targetPos, targetVelocity, playerGravity, playerHeight, playerJump, params)
         local eps = 1e-9
+        
         local function isZero(d)
             return (d > -eps and d < eps)
         end
@@ -506,6 +507,15 @@ local prediction = {
         local p, q, r = targetVelocity.X, targetVelocity.Y, targetVelocity.Z
         local h, j, k = disp.X, disp.Y, disp.Z
         local l = -.5 * gravity
+        
+        if playerGravity and playerGravity ~= workspace.Gravity then
+            local timeToTarget = (targetPos - origin).Magnitude / projectileSpeed
+            q = q + (playerGravity - workspace.Gravity) * timeToTarget
+        end
+        
+        if playerJump then
+            q = q + playerJump
+        end
 
         local solutions = solveQuartic(
             l*l,
@@ -540,6 +550,35 @@ local prediction = {
         end
     end
 }
+
+local function getBestTarget(range, part, players, npcs, walls)
+    if not entitylib.isAlive then return nil end
+    
+    local localPos = entitylib.character.RootPart.Position
+    local bestTarget = nil
+    local bestDistance = range
+    
+    for _, entity in pairs(entitylib.List) do
+        if not entity.Targetable then continue end
+        if not players and entity.Player then continue end
+        if not npcs and entity.NPC then continue end
+        if not entity[part] then continue end
+        
+        local distance = (localPos - entity[part].Position).Magnitude
+        if distance <= bestDistance then
+            if walls then
+                if entitylib.Wallcheck(localPos, entity[part].Position) then
+                    continue
+                end
+            end
+            
+            bestTarget = entity
+            bestDistance = distance
+        end
+    end
+    
+    return bestTarget
+end
 
 local mainPlayersService = cloneref(game:GetService('Players'))
 local mainReplicatedStorage = cloneref(game:GetService('ReplicatedStorage'))
@@ -838,48 +877,91 @@ end
 
 local function entityPosition(options)
     options = options or {}
-    local range = options.Range or 50
+    local optimalReach = getOptimalReachDistance()
+    local range = options.Range or optimalReach * 50
     local part = options.Part or 'RootPart'
     local players = options.Players
     
-    debugPrint(string.format("entityPosition() called - Range: %d, Part: %s, Players: %s", 
-        range, part, tostring(players)), "ENTITY")
-    
     if not entitylib.isAlive then 
-        debugPrint("entityPosition() failed: player not alive", "ENTITY")
         return nil 
     end
     
     local localPos = entitylib.character.RootPart.Position
-    local entityCount = 0
-    local targetableCount = 0
     local closest = nil
     local closestDistance = range
     
     for _, entity in pairs(entitylib.List) do
-        entityCount = entityCount + 1
         if entity.Targetable and entity[part] then
-            targetableCount = targetableCount + 1
             local distance = (localPos - entity[part].Position).Magnitude
-            debugPrint(string.format("Found entity at distance: %.2f (range: %d)", distance, range), "ENTITY")
             
             if distance <= closestDistance then
                 if players and entity.Player then
                     closest = entity
                     closestDistance = distance
-                    debugPrint(string.format("entityPosition() found closer player target: %s at %.2f", entity.Player.Name, distance), "ENTITY")
                 elseif not players then
                     closest = entity
                     closestDistance = distance
-                    debugPrint("entityPosition() found closer non-player target", "ENTITY")
                 end
             end
         end
     end
     
-    debugPrint(string.format("entityPosition() result - Total entities: %d, Targetable: %d, Found: %s", 
-        entityCount, targetableCount, closest and "YES" or "NO"), "ENTITY")
     return closest
+end
+
+local function improvedEntityMouse(options)
+    options = options or {}
+    local mouseLocation = options.MouseOrigin or getMousePosition()
+    local sortingTable = {}
+    
+    if not entitylib.isAlive then 
+        return nil 
+    end
+    
+    local optimalReach = getOptimalReachDistance()
+    local range = options.Range or optimalReach * 50
+    
+    for _, v in entitylib.List do
+        if not options.Players and v.Player then continue end
+        if not options.NPCs and v.NPC then continue end
+        if not v.Targetable then continue end
+        
+        local position, vis = gameCamera:WorldToViewportPoint(v[options.Part].Position)
+        if not vis then continue end
+        
+        local mag = (mouseLocation - Vector2.new(position.x, position.y)).Magnitude
+        if mag > range then continue end
+        
+        if entitylib.isVulnerable(v) then
+            local distanceToPlayer = (entitylib.character.RootPart.Position - v[options.Part].Position).Magnitude
+            local reachScore = optimalReach * 50 - distanceToPlayer
+            
+            table.insert(sortingTable, {
+                Entity = v,
+                Magnitude = mag,
+                Distance = distanceToPlayer,
+                ReachScore = reachScore
+            })
+        end
+    end
+
+    table.sort(sortingTable, function(a, b)
+        if math.abs(a.ReachScore - b.ReachScore) < 5 then
+            return a.Magnitude < b.Magnitude
+        end
+        return a.ReachScore > b.ReachScore
+    end)
+
+    for _, v in sortingTable do
+        if options.Wallcheck then
+            if entitylib.Wallcheck(options.Origin or entitylib.character.HumanoidRootPart.Position, v.Entity[options.Part].Position, options.Wallcheck) then 
+                continue 
+            end
+        end
+        return v.Entity
+    end
+    
+    return nil
 end
 
 local function setupBedwars()
@@ -1266,7 +1348,7 @@ local function hookClientGet()
             return {
                 instance = call.instance,
                 SendToServer = function(_, attackTable, ...)
-                    if attackTable and attackTable.validate then
+                    if attackTable and attackTable.validate and HitFixEnabled then
                         local selfpos = attackTable.validate.selfPosition and attackTable.validate.selfPosition.value
                         local targetpos = attackTable.validate.targetPosition and attackTable.validate.targetPosition.value
                         
@@ -1274,7 +1356,10 @@ local function hookClientGet()
                             store.attackReach = ((selfpos - targetpos).Magnitude * 100) // 1 / 100
                             store.attackReachUpdate = tick() + 1
                             
-                            if HitFixEnabled then
+                            local optimalReach = getOptimalReachDistance()
+                            local distance = (selfpos - targetpos).Magnitude
+                            
+                            if distance > optimalReach - 2 and distance < optimalReach + 2 then
                                 attackTable.validate.raycast = attackTable.validate.raycast or {}
                                 attackTable.validate.selfPosition.value = selfpos + CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
                             end
@@ -1287,6 +1372,26 @@ local function hookClientGet()
         
         return call
     end
+end
+
+local function getOptimalReachDistance()
+    if not entitylib.isAlive then return 14 end
+    
+    local baseReach = 14
+    local sword, _ = getSword()
+    
+    if sword then
+        local swordMeta = bedwars.ItemMeta[sword.itemType].sword
+        if swordMeta and swordMeta.range then
+            baseReach = swordMeta.range
+        end
+    end
+    
+    if HitBoxesEnabled and Settings.HitBoxesMode == 'Player' then
+        baseReach = baseReach + (Settings.HitBoxesExpandAmount / 20)
+    end
+    
+    return math.min(baseReach, 18)
 end
 
 local originalReachDistance = nil
@@ -1326,7 +1431,7 @@ local function setupHitFix()
         local success = pcall(function()
             if swordController and swordController.swingSwordAtMouse then
                 debug.setconstant(swordController.swingSwordAtMouse, 23, enabled and 'raycast' or 'Raycast')
-                debug.setupvalue(swordController.swingSwordAtMouse, 4, enabled and bedwars.QueryUtil or workspace)
+                debug.setupvalue(swingSwordAtMouse, 4, enabled and bedwars.QueryUtil or workspace)
             end
         end)
         return success
@@ -1360,7 +1465,6 @@ local function setupHitFix()
     local hookSuccess = pcall(function() applyFunctionHook(HitFixEnabled) end)
     local debugSuccess = applyDebugPatch(HitFixEnabled)
     local reachSuccess = applyReach(HitFixEnabled)
-
 
     return hookSuccess and reachSuccess
 end
@@ -1443,8 +1547,6 @@ local NoSlowdownEnabled = false
 local oldSlowdown = nil
 
 local function createHitbox(ent)
-    debugPrint(string.format("createHitbox() called for entity: %s", ent.Player and ent.Player.Name or "NPC"), "HITBOX")
-    
     if ent.Targetable and ent.Player then
         local success = pcall(function()
             local hitbox = Instance.new('Part')
@@ -1461,12 +1563,7 @@ local function createHitbox(ent)
             weld.Parent = hitbox
             
             hitboxObjects[ent] = hitbox
-            debugPrint(string.format("Created hitbox for %s with size: %s", ent.Player.Name, tostring(hitbox.Size)), "HITBOX")
         end)
-        
-        if not success then
-            debugPrint(string.format("Failed to create hitbox for %s", ent.Player and ent.Player.Name or "unknown"), "HITBOX")
-        end
     end
 end
 
@@ -1480,12 +1577,10 @@ end
 
 local function applySwordHitbox(enabled)
     if not bedwarsLoaded or not bedwars or not bedwars.SwordController then
-        debugPrint("applySwordHitbox() failed: bedwars not loaded or SwordController missing", "HITBOX")
         return false
     end
     
     if not bedwars.SwordController.swingSwordInRegion then
-        debugPrint("applySwordHitbox() failed: swingSwordInRegion function not found", "HITBOX")
         return false
     end
     
@@ -1493,17 +1588,11 @@ local function applySwordHitbox(enabled)
         if enabled then
             debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (Settings.HitBoxesExpandAmount / 3))
             hitboxSet = true
-            debugPrint(string.format("Applied sword hitbox with range: %.2f", Settings.HitBoxesExpandAmount / 3), "HITBOX")
         else
             debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
             hitboxSet = nil
-            debugPrint("Removed sword hitbox, restored to 3.8", "HITBOX")
         end
     end)
-    
-    if not success then
-        debugPrint("applySwordHitbox() failed to modify swingSwordInRegion: " .. tostring(errorMsg), "HITBOX")
-    end
     
     return success
 end
@@ -1518,21 +1607,16 @@ local function updatePlayerHitboxes()
 end
 
 local function enableHitboxes()
-    debugPrint(string.format("enableHitboxes() called - Mode: %s, Expand: %.2f", Settings.HitBoxesMode, Settings.HitBoxesExpandAmount), "HITBOX")
-    
     if not entitylib.Running then
         entitylib.start()
-        debugPrint("Started entitylib for hitboxes", "HITBOX")
     end
     
     if Settings.HitBoxesMode == 'Sword' then
         local success = applySwordHitbox(true)
         if success then
             HitBoxesEnabled = true
-            debugPrint("Sword hitboxes enabled successfully", "HITBOX")
             return true
         else
-            debugPrint("Failed to enable sword hitboxes", "HITBOX")
             return false
         end
     else 
@@ -1548,7 +1632,6 @@ local function enableHitboxes()
         end
         
         HitBoxesEnabled = true
-        debugPrint(string.format("Player hitboxes enabled successfully - Created %d hitboxes", #hitboxObjects), "HITBOX")
         return true
     end
 end
@@ -2092,10 +2175,8 @@ local function enableProjectileAimbot()
 
         bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
             local self, projmeta, worldmeta, origin, shootpos = ...
-
-            debugPrint("Projectile aimbot calculating launch values", "PROJECTILE")
-
-            local plr = entityMouse({
+            
+            local plr = improvedEntityMouse({
                 Part = ProjectileAimbotSettings.TargetPart,
                 Range = ProjectileAimbotSettings.FOV,
                 Players = ProjectileAimbotSettings.Players,
@@ -2105,69 +2186,85 @@ local function enableProjectileAimbot()
             })
 
             if plr then
-                debugPrint("Target found: " .. (plr.Player and plr.Player.Name or "NPC"), "PROJECTILE")
-
                 local pos = shootpos or (self.getLaunchPosition and self:getLaunchPosition(origin) or origin)
                 if not pos then
-                    debugPrint("No launch position found", "PROJECTILE")
                     return oldCalculateImportantLaunchValues(...)
                 end
 
                 if (not ProjectileAimbotSettings.OtherProjectiles) and not projmeta.projectile:find('arrow') then
-                    debugPrint("Other projectiles disabled and not arrow", "PROJECTILE")
                     return oldCalculateImportantLaunchValues(...)
                 end
 
                 local meta = projmeta:getProjectileMeta() or {}
-                if not meta.predictionLifetimeSec then
-                    meta = {
-                        predictionLifetimeSec = 3,
-                        lifetimeSec = 3,
-                        gravitationalAcceleration = 196.2,
-                        launchVelocity = 100
-                    }
-                end
-
                 local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
                 local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
                 local projSpeed = (meta.launchVelocity or 100)
                 local offsetpos = pos + (projmeta.projectile == 'owl_projectile' and Vector3.zero or projmeta.fromPositionOffset)
+                
+                local balloons = plr.Character and plr.Character:GetAttribute('InflatedBalloons')
+                local playerGravity = workspace.Gravity
 
-                debugPrint("Projectile speed: " .. projSpeed .. ", Gravity: " .. gravity, "PROJECTILE")
+                if balloons and balloons > 0 then
+                    playerGravity = (workspace.Gravity * (1 - ((balloons >= 4 and 1.2 or balloons >= 3 and 1 or 0.975))))
+                end
 
-                local targetLook = CFrame.new(offsetpos, plr[ProjectileAimbotSettings.TargetPart].Position)
-                local targetPos = plr[ProjectileAimbotSettings.TargetPart].Position
-                local targetVel = projmeta.projectile == 'telepearl' and Vector3.zero or plr[ProjectileAimbotSettings.TargetPart].Velocity
+                if plr.Character and plr.Character.PrimaryPart and plr.Character.PrimaryPart:FindFirstChild('rbxassetid://8200754399') then
+                    playerGravity = 6
+                end
 
-                debugPrint("Target position: " .. tostring(targetPos), "PROJECTILE")
+                if plr.Player and plr.Player:GetAttribute('IsOwlTarget') then
+                    for _, owl in collectionService:GetTagged('Owl') do
+                        if owl:GetAttribute('Target') == plr.Player.UserId and owl:GetAttribute('Status') == 2 then
+                            playerGravity = 0
+                        end
+                    end
+                end
 
+                local newlook = CFrame.new(offsetpos, plr[ProjectileAimbotSettings.TargetPart].Position) 
+                if projmeta.projectile ~= 'owl_projectile' and bedwars.BowConstantsTable then
+                    newlook = newlook * CFrame.new(Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
+                end
+                
+                local targetVelocity = projmeta.projectile == 'telepearl' and Vector3.zero or plr[ProjectileAimbotSettings.TargetPart].Velocity
+                
+                if targetVelocity.Magnitude > 5 then 
+                    local movementDirection = targetVelocity.Unit
+                    local movementSpeed = targetVelocity.Magnitude
+                    local timeToTarget = (plr[ProjectileAimbotSettings.TargetPart].Position - offsetpos).Magnitude / projSpeed
+                    
+                    targetVelocity = targetVelocity + (movementDirection * movementSpeed * 0.3 * timeToTarget)
+                end
+                
+                local playerJump = nil
+                if plr.Humanoid then
+                    if plr.Humanoid:GetState() == Enum.HumanoidStateType.Jumping then
+                        playerJump = 42.6 
+                    elseif targetVelocity.Y > 5 then 
+                        playerJump = targetVelocity.Y * 1.2
+                    end
+                end
+                
                 local calc = prediction.SolveTrajectory(
-                    targetLook.p,
-                    projSpeed,
-                    gravity,
-                    targetPos,
-                    targetVel,
-                    workspace.Gravity,  
-                    plr.HipHeight,
-                    plr.Jumping and 50 or nil  
+                    newlook.p, 
+                    projSpeed, 
+                    gravity, 
+                    plr[ProjectileAimbotSettings.TargetPart].Position, 
+                    targetVelocity, 
+                    playerGravity, 
+                    plr.HipHeight, 
+                    playerJump
                 )
-
-                debugPrint("Trajectory calculation result: " .. tostring(calc), "PROJECTILE")
-
+                
                 if calc then
                     debugPrint("Projectile aimbot target acquired!", "PROJECTILE")
                     return {
-                        initialVelocity = CFrame.new(targetLook.Position, calc).LookVector * projSpeed,
+                        initialVelocity = CFrame.new(newlook.Position, calc).LookVector * projSpeed,
                         positionFrom = offsetpos,
                         deltaT = lifetime,
                         gravitationalAcceleration = gravity,
                         drawDurationSeconds = 5
                     }
-                else
-                    debugPrint("Trajectory calculation failed", "PROJECTILE")
                 end
-            else
-                debugPrint("No target found", "PROJECTILE")
             end
 
             return oldCalculateImportantLaunchValues(...)
@@ -2181,30 +2278,6 @@ local function enableProjectileAimbot()
         debugPrint("enableProjectileAimbot() failed: " .. tostring(success), "ERROR")
     end
 
-    return success
-end
-
-local function disableProjectileAimbot()
-    if not ProjectileAimbotEnabled or not bedwarsLoaded or not bedwars.ProjectileController then 
-        debugPrint("disableProjectileAimbot() failed: not enabled or prerequisites not met", "ERROR")
-        return false 
-    end
-    
-    debugPrint("disableProjectileAimbot() called", "DEBUG")
-    
-    local success = pcall(function()
-        if oldCalculateImportantLaunchValues then
-            bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
-            oldCalculateImportantLaunchValues = nil
-            ProjectileAimbotEnabled = false
-            debugPrint("Projectile aimbot disabled successfully", "SUCCESS")
-        end
-    end)
-    
-    if not success then
-        debugPrint("disableProjectileAimbot() failed: " .. tostring(success), "ERROR")
-    end
-    
     return success
 end
 
