@@ -344,7 +344,6 @@ local prediction = {
         local function solveQuadric(c0, c1, c2)
             local s0, s1
             local p, q, D
-
             p = c1 / (2 * c0)
             q = c2 / c0
             D = p * p - q
@@ -369,14 +368,16 @@ local prediction = {
             local sq_A, p, q
             local cb_p, D
 
+            if c0 == 0 then
+                return solveQuadric(c1, c2, c3)
+            end
+
             A = c1 / c0
             B = c2 / c0
             C = c3 / c0
-
             sq_A = A * A
             p = (1 / 3) * (-(1 / 3) * sq_A + B)
             q = 0.5 * ((2 / 27) * A * sq_A - (1 / 3) * A * B + C)
-
             cb_p = p * p * p
             D = q * q + cb_p
 
@@ -511,14 +512,24 @@ local prediction = {
         local p, q, r = targetVelocity.X, targetVelocity.Y, targetVelocity.Z
         local h, j, k = disp.X, disp.Y, disp.Z
         local l = -.5 * gravity
-        
-        if playerGravity and playerGravity ~= workspace.Gravity then
-            local timeToTarget = (targetPos - origin).Magnitude / projectileSpeed
-            q = q + (playerGravity - workspace.Gravity) * timeToTarget
-        end
-        
-        if playerJump then
-            q = q + playerJump
+
+        if math.abs(q) > 0.01 and playerGravity and playerGravity > 0 then
+            local estTime = (disp.Magnitude / projectileSpeed)
+            for i = 1, 3 do
+                q -= (.5 * playerGravity) * estTime
+                local velo = targetVelocity * 0.016
+                local ray = workspace:Raycast(Vector3.new(targetPos.X, targetPos.Y, targetPos.Z), Vector3.new(velo.X, (q * estTime) - playerHeight, velo.Z), params)
+                if ray then
+                    local newTarget = ray.Position + Vector3.new(0, playerHeight, 0)
+                    estTime -= math.sqrt(((targetPos - newTarget).Magnitude * 2) / playerGravity)
+                    targetPos = newTarget
+                    j = (targetPos - origin).Y
+                    q = 0
+                    break
+                else
+                    break
+                end
+            end
         end
 
         local solutions = solveQuartic(
@@ -554,35 +565,6 @@ local prediction = {
         end
     end
 }
-
-local function getBestTarget(range, part, players, npcs, walls)
-    if not entitylib.isAlive then return nil end
-    
-    local localPos = entitylib.character.RootPart.Position
-    local bestTarget = nil
-    local bestDistance = range
-    
-    for _, entity in pairs(entitylib.List) do
-        if not entity.Targetable then continue end
-        if not players and entity.Player then continue end
-        if not npcs and entity.NPC then continue end
-        if not entity[part] then continue end
-        
-        local distance = (localPos - entity[part].Position).Magnitude
-        if distance <= bestDistance then
-            if walls then
-                if entitylib.Wallcheck(localPos, entity[part].Position) then
-                    continue
-                end
-            end
-            
-            bestTarget = entity
-            bestDistance = distance
-        end
-    end
-    
-    return bestTarget
-end
 
 local mainPlayersService = cloneref(game:GetService('Players'))
 local mainReplicatedStorage = cloneref(game:GetService('ReplicatedStorage'))
@@ -845,16 +827,20 @@ local function entityMouse(options)
         if not options.NPCs and v.NPC then continue end
         if not v.Targetable then continue end
         
-        local position, vis = gameCamera:WorldToViewportPoint(v[options.Part].Position)
+        local targetPart = v[options.Part or 'RootPart']
+        if not targetPart then continue end
+        
+        local position, vis = gameCamera:WorldToViewportPoint(targetPart.Position)
         if not vis then continue end
         
         local mag = (mouseLocation - Vector2.new(position.x, position.y)).Magnitude
-        if mag > options.Range then continue end
+        if mag > (options.Range or 1000) then continue end
         
         if entitylib.isVulnerable(v) then
             table.insert(sortingTable, {
                 Entity = v,
-                Magnitude = v.Target and -1 or mag
+                Magnitude = mag,
+                Position = position
             })
         end
     end
@@ -865,10 +851,11 @@ local function entityMouse(options)
 
     for _, v in sortingTable do
         if options.Wallcheck then
-            if entitylib.Wallcheck(options.Origin or entitylib.character.HumanoidRootPart.Position, v.Entity[options.Part].Position, options.Wallcheck) then 
+            if entitylib.Wallcheck(options.Origin or entitylib.character.HumanoidRootPart.Position, v.Entity[options.Part or 'RootPart'].Position, options.Wallcheck) then 
                 continue 
             end
         end
+        
         table.clear(options)
         table.clear(sortingTable)
         return v.Entity
@@ -924,6 +911,8 @@ local function entityPosition(options)
         entityCount, targetableCount, closest and "YES" or "NO"), "ENTITY")
     return closest
 end
+
+
 
 local function setupBedwars()
     if not knit then return false end
@@ -2119,6 +2108,166 @@ local function disableNoSlowdown()
     return success
 end
 
+local strafingPatterns = {}
+local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, gravity)
+    if not targetPlayer or not targetPlayer.Character or not targetPart then 
+        return targetPart and targetPart.Position or Vector3.zero
+    end
+    
+    local playerId = targetPlayer.UserId
+    local currentPos = targetPart.Position
+    local currentVel = targetPart.Velocity
+    
+    if not strafingPatterns[playerId] then
+        strafingPatterns[playerId] = {
+            lastPositions = {},
+            lastUpdate = tick(),
+            pattern = "none",
+            directionChanges = 0,
+            strafeDirection = 1,
+            strafeTimer = 0
+        }
+    end
+    
+    local patternData = strafingPatterns[playerId]
+    local currentTime = tick()
+    
+    table.insert(patternData.lastPositions, {
+        position = currentPos,
+        velocity = currentVel,
+        time = currentTime
+    })
+    
+    while #patternData.lastPositions > 0 and currentTime - patternData.lastPositions[1].time > 1.5 do
+        table.remove(patternData.lastPositions, 1)
+    end
+    
+    local localPos = entitylib.isAlive and entitylib.character.RootPart.Position or currentPos
+    local timeToTarget = (currentPos - localPos).Magnitude / projSpeed
+    
+    local basePrediction = currentPos + (currentVel * timeToTarget * 0.35)
+    
+    if #patternData.lastPositions < 3 then
+        return basePrediction
+    end
+    
+    local recentDirectionChanges = 0
+    local avgHorizontalSpeed = 0
+    local horizontalMovements = {}
+    
+    for i = 2, #patternData.lastPositions do
+        local prev = patternData.lastPositions[i-1]
+        local curr = patternData.lastPositions[i]
+        local timeDiff = curr.time - prev.time
+        
+        if timeDiff > 0 then
+            local prevHorizontal = Vector3.new(prev.velocity.X, 0, prev.velocity.Z)
+            local currHorizontal = Vector3.new(curr.velocity.X, 0, curr.velocity.Z)
+            
+            if currHorizontal.Magnitude > 2 then
+                avgHorizontalSpeed = avgHorizontalSpeed + currHorizontal.Magnitude
+                
+                if prevHorizontal.Magnitude > 2 then
+                    local dot = prevHorizontal.Unit:Dot(currHorizontal.Unit)
+                    if dot < 0.6 then 
+                        recentDirectionChanges = recentDirectionChanges + 1
+                    end
+                end
+                
+                if currHorizontal.X ~= 0 then
+                    local direction = currHorizontal.X > 0 and 1 or -1
+                    table.insert(horizontalMovements, {
+                        direction = direction,
+                        magnitude = math.abs(currHorizontal.X),
+                        time = curr.time
+                    })
+                end
+            end
+        end
+    end
+    
+    if #patternData.lastPositions > 1 then
+        avgHorizontalSpeed = avgHorizontalSpeed / (#patternData.lastPositions - 1)
+    end
+    
+    if recentDirectionChanges >= 1 and avgHorizontalSpeed > 4 then
+        patternData.pattern = "strafing"
+        patternData.directionChanges = recentDirectionChanges
+        
+        if #horizontalMovements >= 2 then
+            local lastMovement = horizontalMovements[#horizontalMovements]
+            local prevMovement = horizontalMovements[#horizontalMovements - 1]
+            
+            local strafeDurations = {}
+            for i = 2, #horizontalMovements do
+                if horizontalMovements[i].direction ~= horizontalMovements[i-1].direction then
+                    local duration = horizontalMovements[i].time - horizontalMovements[i-1].time
+                    table.insert(strafeDurations, duration)
+                end
+            end
+            
+            if #strafeDurations > 0 then
+                local avgStrafeDuration = 0
+                for _, dur in ipairs(strafeDurations) do
+                    avgStrafeDuration = avgStrafeDuration + dur
+                end
+                avgStrafeDuration = avgStrafeDuration / #strafeDurations
+                
+                local timeSinceLastChange = currentTime - horizontalMovements[#horizontalMovements].time
+                local predictedChangeTime = avgStrafeDuration - timeSinceLastChange
+                
+                if predictedChangeTime < timeToTarget and predictedChangeTime > 0 then
+                    patternData.strafeDirection = -patternData.strafeDirection
+                    local predictedOffset = Vector3.new(patternData.strafeDirection * avgHorizontalSpeed * 0.8, 0, 0)
+                    return currentPos + (predictedOffset * timeToTarget * 0.6)
+                end
+            end
+        end
+        
+        local strafePrediction = currentVel.Unit * (avgHorizontalSpeed * timeToTarget * 0.4)
+        return currentPos + strafePrediction
+    else
+        patternData.pattern = "linear"
+    end
+    
+    if patternData.pattern == "linear" and currentVel.Magnitude > 3 then
+        return currentPos + (currentVel * timeToTarget * 0.5)
+    end
+    
+    return basePrediction
+end
+
+local function smoothAim(currentCFrame, targetPosition, smoothnessFactor, maxAngleChange)
+    smoothnessFactor = math.clamp(smoothnessFactor or 0.3, 0.1, 1.0)
+    maxAngleChange = maxAngleChange or math.rad(15) 
+    
+    local currentLook = currentCFrame.LookVector
+    local targetDirection = (targetPosition - currentCFrame.Position).Unit
+    
+    local dot = currentLook:Dot(targetDirection)
+    local angle = math.acos(math.clamp(dot, -1, 1))
+    
+    if angle < math.rad(2) then
+        return CFrame.new(currentCFrame.Position, targetPosition)
+    end
+    
+    local limitedAngle = math.min(angle, maxAngleChange)
+    
+    local smoothAngle = limitedAngle * smoothnessFactor
+    
+    local axis = currentLook:Cross(targetDirection)
+    if axis.Magnitude > 0 then
+        axis = axis.Unit
+        
+        local smoothRotation = CFrame.fromAxisAngle(axis, smoothAngle)
+        local newLook = smoothRotation * currentLook
+        
+        return CFrame.new(currentCFrame.Position, currentCFrame.Position + newLook)
+    end
+    
+    return CFrame.new(currentCFrame.Position, targetPosition)
+end
+
 local function enableProjectileAimbot()
     if ProjectileAimbotEnabled or not bedwarsLoaded or not bedwars.ProjectileController then
         debugPrint("enableProjectileAimbot() failed: prerequisites not met", "ERROR")
@@ -2136,6 +2285,10 @@ local function enableProjectileAimbot()
         bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
             local self, projmeta, worldmeta, origin, shootpos = ...
             
+            local rayCheck = RaycastParams.new()
+            rayCheck.FilterType = Enum.RaycastFilterType.Include
+            rayCheck.FilterDescendantsInstances = {workspace:FindFirstChild('Map') or workspace}
+            
             local plr = entityMouse({
                 Part = ProjectileAimbotSettings.TargetPart,
                 Range = ProjectileAimbotSettings.FOV,
@@ -2145,7 +2298,7 @@ local function enableProjectileAimbot()
                 Origin = entitylib.isAlive and (shootpos or entitylib.character.RootPart.Position) or Vector3.zero
             })
 
-            if plr then
+            if plr and plr.Character and plr[ProjectileAimbotSettings.TargetPart] then
                 local pos = shootpos or (self.getLaunchPosition and self:getLaunchPosition(origin) or origin)
                 if not pos then
                     return oldCalculateImportantLaunchValues(...)
@@ -2161,47 +2314,91 @@ local function enableProjectileAimbot()
                 local projSpeed = (meta.launchVelocity or 100)
                 local offsetpos = pos + (projmeta.projectile == 'owl_projectile' and Vector3.zero or projmeta.fromPositionOffset)
                 
-                local balloons = plr.Character and plr.Character:GetAttribute('InflatedBalloons')
                 local playerGravity = workspace.Gravity
-
+                local balloons = plr.Character and plr.Character:GetAttribute('InflatedBalloons')
+                
                 if balloons and balloons > 0 then
-                    playerGravity = (workspace.Gravity * (1 - ((balloons >= 4 and 1.2 or balloons >= 3 and 1 or 0.975))))
-                end
-
-                if plr.Character and plr.Character.PrimaryPart and plr.Character.PrimaryPart:FindFirstChild('rbxassetid://8200754399') then
-                    playerGravity = 6
+                    local gravityMultiplier = 1
+                    if balloons >= 4 then
+                        gravityMultiplier = 0.8  
+                    elseif balloons >= 3 then
+                        gravityMultiplier = 0.85
+                    else
+                        gravityMultiplier = 0.9
+                    end
+                    playerGravity = workspace.Gravity * gravityMultiplier
                 end
 
                 if plr.Player and plr.Player:GetAttribute('IsOwlTarget') then
                     for _, owl in collectionService:GetTagged('Owl') do
                         if owl:GetAttribute('Target') == plr.Player.UserId and owl:GetAttribute('Status') == 2 then
                             playerGravity = 0
+                            break
                         end
                     end
                 end
 
-                local newlook = CFrame.new(offsetpos, plr[ProjectileAimbotSettings.TargetPart].Position) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
+                if plr.Character and plr.Character.PrimaryPart and plr.Character.PrimaryPart:FindFirstChild('rbxassetid://8200754399') then
+                    playerGravity = 6
+                end
+
+                local rawLook = CFrame.new(offsetpos, plr[ProjectileAimbotSettings.TargetPart].Position)
                 
+                local newlook = smoothAim(
+                    rawLook, 
+                    plr[ProjectileAimbotSettings.TargetPart].Position, 
+                    0.5, 
+                    math.rad(10) 
+                )
+                
+                if projmeta.projectile ~= 'owl_projectile' then
+                    newlook = newlook * CFrame.new(
+                        bedwars.BowConstantsTable.RelX or 0,
+                        bedwars.BowConstantsTable.RelY or 0,
+                        bedwars.BowConstantsTable.RelZ or 0
+                    )
+                end
+
+                local targetVelocity = projmeta.projectile == 'telepearl' and Vector3.zero or plr[ProjectileAimbotSettings.TargetPart].Velocity
+
+                local predictedPosition
+                local success, err = pcall(function()
+                    predictedPosition = predictStrafingMovement(plr.Player, plr[ProjectileAimbotSettings.TargetPart], projSpeed, gravity)
+                end)
+
+                if not success or not predictedPosition then
+                    predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + (targetVelocity * timeToTarget * 0.3)
+                end
+
                 local calc = prediction.SolveTrajectory(
                     newlook.p, 
                     projSpeed, 
                     gravity, 
-                    plr[ProjectileAimbotSettings.TargetPart].Position, 
-                    projmeta.projectile == 'telepearl' and Vector3.zero or plr[ProjectileAimbotSettings.TargetPart].Velocity, 
+                    predictedPosition, 
+                    targetVelocity, 
                     playerGravity, 
                     plr.HipHeight, 
-                    plr.Jumping and 42.6 or nil
+                    plr.Jumping and 50 or nil,
+                    rayCheck
                 )
                 
                 if calc then
-                    debugPrint("Projectile aimbot target acquired!", "PROJECTILE")
-                    return {
-                        initialVelocity = CFrame.new(newlook.Position, calc).LookVector * projSpeed,
-                        positionFrom = offsetpos,
-                        deltaT = lifetime,
-                        gravitationalAcceleration = gravity,
-                        drawDurationSeconds = 5
-                    }
+                    debugPrint("Projectile aimbot target acquired with enhanced prediction!", "PROJECTILE")
+                    
+                    local finalDirection = (calc - newlook.p).Unit
+                    local angleFromHorizontal = math.acos(math.clamp(finalDirection:Dot(Vector3.new(0, 1, 0)), -1, 1))
+                    
+                    if angleFromHorizontal > math.rad(10) and angleFromHorizontal < math.rad(170) then
+                        return {
+                            initialVelocity = finalDirection * projSpeed,
+                            positionFrom = offsetpos,
+                            deltaT = lifetime,
+                            gravitationalAcceleration = gravity,
+                            drawDurationSeconds = 5
+                        }
+                    else
+                        debugPrint("Prediction resulted in extreme angle, using fallback", "PROJECTILE")
+                    end
                 end
             end
 
@@ -2209,7 +2406,7 @@ local function enableProjectileAimbot()
         end
 
         ProjectileAimbotEnabled = true
-        debugPrint("Projectile aimbot enabled successfully", "SUCCESS")
+        debugPrint("Enhanced projectile aimbot enabled successfully", "SUCCESS")
     end)
 
     if not success then
@@ -2423,6 +2620,7 @@ end)
 
 addCleanupFunction(function()
     disableAllFeatures()
+    table.clear(strafingPatterns)
     pcall(function()
         if originalFunctions then
             for funcName, original in pairs(originalFunctions) do
