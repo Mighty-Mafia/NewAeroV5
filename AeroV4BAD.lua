@@ -515,13 +515,18 @@ local prediction = {
 
         if math.abs(q) > 0.01 and playerGravity and playerGravity > 0 then
             local estTime = (disp.Magnitude / projectileSpeed)
-            for i = 1, 3 do
+            local maxIterations = 3
+            
+            for i = 1, maxIterations do
                 q -= (.5 * playerGravity) * estTime
                 local velo = targetVelocity * 0.016
-                local ray = workspace:Raycast(Vector3.new(targetPos.X, targetPos.Y, targetPos.Z), Vector3.new(velo.X, (q * estTime) - playerHeight, velo.Z), params)
+                local ray = workspace:Raycast(Vector3.new(targetPos.X, targetPos.Y, targetPos.Z), 
+                    Vector3.new(velo.X, (q * estTime) - playerHeight, velo.Z), params)
+                
                 if ray then
                     local newTarget = ray.Position + Vector3.new(0, playerHeight, 0)
-                    estTime -= math.sqrt(((targetPos - newTarget).Magnitude * 2) / playerGravity)
+                    local distanceDiff = (targetPos - newTarget).Magnitude
+                    estTime -= math.sqrt((distanceDiff * 2) / math.max(playerGravity, 1))
                     targetPos = newTarget
                     j = (targetPos - origin).Y
                     q = 0
@@ -565,6 +570,143 @@ local prediction = {
         end
     end
 }
+
+local strafingPatterns = {}
+local movementHistory = {}
+
+local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, gravity, origin)
+    if not targetPlayer or not targetPlayer.Character or not targetPart then 
+        return targetPart and targetPart.Position or Vector3.zero
+    end
+    
+    local playerId = targetPlayer.UserId
+    local currentPos = targetPart.Position
+    local currentVel = targetPart.Velocity
+    
+    if not movementHistory[playerId] then
+        movementHistory[playerId] = {
+            positions = {},
+            velocities = {},
+            timestamps = {},
+            pattern = "linear",
+            lastDirectionChange = 0,
+            strafeIntensity = 0
+        }
+    end
+    
+    local history = movementHistory[playerId]
+    local currentTime = tick()
+    
+    table.insert(history.positions, currentPos)
+    table.insert(history.velocities, currentVel)
+    table.insert(history.timestamps, currentTime)
+    
+    while #history.timestamps > 0 and currentTime - history.timestamps[1] > 1.0 do
+        table.remove(history.positions, 1)
+        table.remove(history.velocities, 1)
+        table.remove(history.timestamps, 1)
+    end
+    
+    local distance = (currentPos - origin).Magnitude
+    local timeToTarget = distance / projSpeed
+    
+    local basePrediction = currentPos + (currentVel * timeToTarget * 0.35)
+    
+    if #history.positions < 3 then
+        return basePrediction
+    end
+    
+    local directionChanges = 0
+    local avgSpeed = 0
+    local horizontalMovement = Vector3.zero
+    
+    for i = 2, #history.velocities do
+        local prevVel = history.velocities[i-1]
+        local currVel = history.velocities[i]
+        
+        local prevHorizontal = Vector3.new(prevVel.X, 0, prevVel.Z)
+        local currHorizontal = Vector3.new(currVel.X, 0, currVel.Z)
+        
+        if prevHorizontal.Magnitude > 2 and currHorizontal.Magnitude > 2 then
+            avgSpeed = avgSpeed + currHorizontal.Magnitude
+            
+            local dot = prevHorizontal.Unit:Dot(currHorizontal.Unit)
+            if dot < 0.7 then 
+                directionChanges = directionChanges + 1
+                history.lastDirectionChange = currentTime
+            end
+            
+            horizontalMovement = horizontalMovement + currHorizontal
+        end
+    end
+    
+    if #history.velocities > 1 then
+        avgSpeed = avgSpeed / (#history.velocities - 1)
+    end
+    
+    if directionChanges >= 2 and avgSpeed > 4 then
+        history.pattern = "strafing"
+        history.strafeIntensity = math.min(avgSpeed / 10, 1.0)
+        
+        local horizontalDirection = horizontalMovement.Unit
+        local strafePrediction = horizontalDirection * (avgSpeed * timeToTarget * 0.25 * history.strafeIntensity)
+        
+        return currentPos + strafePrediction + (currentVel * timeToTarget * 0.15)
+    
+    elseif math.abs(currentVel.Y) > 8 then
+        history.pattern = "jumping"
+        
+        local jumpFactor = 0.4
+        local maxJumpHeight = 12
+        
+        local jumpPrediction = currentPos + (currentVel * timeToTarget * jumpFactor)
+        
+        if jumpPrediction.Y - currentPos.Y > maxJumpHeight then
+            jumpPrediction = Vector3.new(
+                jumpPrediction.X,
+                currentPos.Y + maxJumpHeight,
+                jumpPrediction.Z
+            )
+        end
+        
+        return jumpPrediction
+    
+    else
+        history.pattern = "linear"
+        history.strafeIntensity = 0
+    end
+    
+    return currentPos + (currentVel * timeToTarget * 0.45)
+end
+
+local function smoothAim(currentCFrame, targetPosition, smoothnessFactor, maxAngleChange)
+    smoothnessFactor = math.clamp(smoothnessFactor or 0.35, 0.2, 0.5)
+    maxAngleChange = maxAngleChange or math.rad(6)
+    
+    local currentLook = currentCFrame.LookVector
+    local targetDirection = (targetPosition - currentCFrame.Position).Unit
+    
+    local dot = currentLook:Dot(targetDirection)
+    local angle = math.acos(math.clamp(dot, -1, 1))
+    
+    if angle < math.rad(2) then
+        return CFrame.new(currentCFrame.Position, targetPosition)
+    end
+    
+    local limitedAngle = math.min(angle, maxAngleChange)
+    local smoothAngle = limitedAngle * smoothnessFactor
+    
+    local axis = currentLook:Cross(targetDirection)
+    if axis.Magnitude > 0 then
+        axis = axis.Unit
+        local smoothRotation = CFrame.fromAxisAngle(axis, smoothAngle)
+        local newLook = smoothRotation * currentLook
+        
+        return CFrame.new(currentCFrame.Position, currentCFrame.Position + newLook)
+    end
+    
+    return CFrame.new(currentCFrame.Position, targetPosition)
+end
 
 local mainPlayersService = cloneref(game:GetService('Players'))
 local mainReplicatedStorage = cloneref(game:GetService('ReplicatedStorage'))
@@ -2126,7 +2268,8 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
             pattern = "none",
             directionChanges = 0,
             strafeDirection = 1,
-            strafeTimer = 0
+            strafeTimer = 0,
+            strafePattern = {}
         }
     end
     
@@ -2155,6 +2298,7 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
     local recentDirectionChanges = 0
     local avgHorizontalSpeed = 0
     local horizontalMovements = {}
+    local verticalMovements = {}
     
     for i = 2, #patternData.lastPositions do
         local prev = patternData.lastPositions[i-1]
@@ -2170,7 +2314,7 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
                 
                 if prevHorizontal.Magnitude > 2 then
                     local dot = prevHorizontal.Unit:Dot(currHorizontal.Unit)
-                    if dot < 0.6 then 
+                    if dot < 0.7 then 
                         recentDirectionChanges = recentDirectionChanges + 1
                     end
                 end
@@ -2184,6 +2328,13 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
                     })
                 end
             end
+            
+            if math.abs(curr.velocity.Y) > 5 then
+                table.insert(verticalMovements, {
+                    velocityY = curr.velocity.Y,
+                    time = curr.time
+                })
+            end
         end
     end
     
@@ -2191,7 +2342,7 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
         avgHorizontalSpeed = avgHorizontalSpeed / (#patternData.lastPositions - 1)
     end
     
-    if recentDirectionChanges >= 1 and avgHorizontalSpeed > 4 then
+    if recentDirectionChanges >= 2 and avgHorizontalSpeed > 4 then
         patternData.pattern = "strafing"
         patternData.directionChanges = recentDirectionChanges
         
@@ -2219,28 +2370,46 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
                 
                 if predictedChangeTime < timeToTarget and predictedChangeTime > 0 then
                     patternData.strafeDirection = -patternData.strafeDirection
-                    local predictedOffset = Vector3.new(patternData.strafeDirection * avgHorizontalSpeed * 0.8, 0, 0)
-                    return currentPos + (predictedOffset * timeToTarget * 0.6)
+                    local predictedOffset = Vector3.new(patternData.strafeDirection * avgHorizontalSpeed * 0.6, 0, 0)
+                    return currentPos + (predictedOffset * timeToTarget * 0.5)
                 end
             end
         end
         
-        local strafePrediction = currentVel.Unit * (avgHorizontalSpeed * timeToTarget * 0.4)
+        local strafePrediction = currentVel.Unit * (avgHorizontalSpeed * timeToTarget * 0.3)
         return currentPos + strafePrediction
+        
+    elseif #verticalMovements > 1 and math.abs(currentVel.Y) > 5 then
+        patternData.pattern = "jumping"
+        
+        local jumpFactor = 0.6 
+        local jumpPrediction = currentPos + (currentVel * timeToTarget * jumpFactor)
+        
+        local maxJumpHeight = 10 
+        if jumpPrediction.Y - currentPos.Y > maxJumpHeight then
+            jumpPrediction = Vector3.new(
+                jumpPrediction.X,
+                currentPos.Y + maxJumpHeight,
+                jumpPrediction.Z
+            )
+        end
+        
+        return jumpPrediction
+        
     else
         patternData.pattern = "linear"
     end
     
     if patternData.pattern == "linear" and currentVel.Magnitude > 3 then
-        return currentPos + (currentVel * timeToTarget * 0.5)
+        return currentPos + (currentVel * timeToTarget * 0.45)
     end
     
     return basePrediction
 end
 
 local function smoothAim(currentCFrame, targetPosition, smoothnessFactor, maxAngleChange)
-    smoothnessFactor = math.clamp(smoothnessFactor or 0.3, 0.1, 1.0)
-    maxAngleChange = maxAngleChange or math.rad(15) 
+    smoothnessFactor = math.clamp(smoothnessFactor or 0.4, 0.2, 0.6) 
+    maxAngleChange = maxAngleChange or math.rad(8) 
     
     local currentLook = currentCFrame.LookVector
     local targetDirection = (targetPosition - currentCFrame.Position).Unit
@@ -2248,7 +2417,7 @@ local function smoothAim(currentCFrame, targetPosition, smoothnessFactor, maxAng
     local dot = currentLook:Dot(targetDirection)
     local angle = math.acos(math.clamp(dot, -1, 1))
     
-    if angle < math.rad(2) then
+    if angle < math.rad(1) then
         return CFrame.new(currentCFrame.Position, targetPosition)
     end
     
@@ -2295,7 +2464,7 @@ local function enableProjectileAimbot()
                 Range = ProjectileAimbotSettings.FOV,
                 Players = ProjectileAimbotSettings.Players,
                 NPCs = ProjectileAimbotSettings.NPCs,
-                Wallcheck = ProjectileAimbotSettings.Walls,
+                Wallcheck = ProjectileAimbotSettings.Walls and rayCheck or nil,
                 Origin = entitylib.isAlive and (shootpos or entitylib.character.RootPart.Position) or Vector3.zero
             })
 
@@ -2345,12 +2514,24 @@ local function enableProjectileAimbot()
 
                 local rawLook = CFrame.new(offsetpos, plr[ProjectileAimbotSettings.TargetPart].Position)
                 
-                local newlook = smoothAim(
-                    rawLook, 
-                    plr[ProjectileAimbotSettings.TargetPart].Position, 
-                    0.5, 
-                    math.rad(10) 
-                )
+                local predictedPosition
+                local success, err = pcall(function()
+                    predictedPosition = predictStrafingMovement(
+                        plr.Player, 
+                        plr[ProjectileAimbotSettings.TargetPart], 
+                        projSpeed, 
+                        gravity,
+                        offsetpos
+                    )
+                end)
+
+                if not success or not predictedPosition then
+                    local timeToTarget = (plr[ProjectileAimbotSettings.TargetPart].Position - offsetpos).Magnitude / projSpeed
+                    predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
+                                       (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.3)
+                end
+
+                local newlook = smoothAim(rawLook, predictedPosition, 0.35, math.rad(5))
                 
                 if projmeta.projectile ~= 'owl_projectile' then
                     newlook = newlook * CFrame.new(
@@ -2362,15 +2543,6 @@ local function enableProjectileAimbot()
 
                 local targetVelocity = projmeta.projectile == 'telepearl' and Vector3.zero or plr[ProjectileAimbotSettings.TargetPart].Velocity
 
-                local predictedPosition
-                local success, err = pcall(function()
-                    predictedPosition = predictStrafingMovement(plr.Player, plr[ProjectileAimbotSettings.TargetPart], projSpeed, gravity)
-                end)
-
-                if not success or not predictedPosition then
-                    predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + (targetVelocity * timeToTarget * 0.3)
-                end
-
                 local calc = prediction.SolveTrajectory(
                     newlook.p, 
                     projSpeed, 
@@ -2379,17 +2551,19 @@ local function enableProjectileAimbot()
                     targetVelocity, 
                     playerGravity, 
                     plr.HipHeight, 
-                    plr.Jumping and 50 or nil,
+                    plr.Jumping and 42.6 or nil,
                     rayCheck
                 )
                 
                 if calc then
-                    debugPrint("Projectile aimbot target acquired with enhanced prediction!", "PROJECTILE")
+                    debugPrint("Enhanced projectile aimbot target acquired! Pattern: " .. 
+                              (movementHistory[plr.Player.UserId] and movementHistory[plr.Player.UserId].pattern or "unknown"), 
+                              "PROJECTILE")
                     
                     local finalDirection = (calc - newlook.p).Unit
                     local angleFromHorizontal = math.acos(math.clamp(finalDirection:Dot(Vector3.new(0, 1, 0)), -1, 1))
                     
-                    if angleFromHorizontal > math.rad(10) and angleFromHorizontal < math.rad(170) then
+                    if angleFromHorizontal > math.rad(5) and angleFromHorizontal < math.rad(175) then
                         return {
                             initialVelocity = finalDirection * projSpeed,
                             positionFrom = offsetpos,
@@ -2625,6 +2799,7 @@ end)
 addCleanupFunction(function()
     disableAllFeatures()
     table.clear(strafingPatterns)
+    table.clear(movementHistory)
     pcall(function()
         if originalFunctions then
             for funcName, original in pairs(originalFunctions) do
