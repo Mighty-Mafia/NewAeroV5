@@ -582,7 +582,8 @@ local Settings = {
     HitBoxesMode = "Player", -- "Sword" or "Player"
     HitBoxesExpandAmount = 70, 
     HitBoxesEnabled = true, 
-    HitBoxesKeybind = "Z", 
+    HitBoxesEnableKeybind = "Z",  
+    HitBoxesDisableKeybind = "X", 
     HitFixEnabled = true,
     InstantPPEnabled = true,
     AutoChargeBowEnabled = false,
@@ -2536,18 +2537,21 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
             end)
         end
 
-    elseif input.KeyCode == Enum.KeyCode[Settings.HitBoxesKeybind] then
-        if HitBoxesEnabled then
-            debugPrint("HitBoxes key pressed - Disabling hitboxes", "INPUT")
-            disableHitboxes()
-            task.spawn(function()
-                showNotification("HitBoxes disabled", 2)
-            end)
-        else
-            debugPrint("HitBoxes key pressed - Enabling hitboxes", "INPUT")
+    elseif input.KeyCode == Enum.KeyCode[Settings.HitBoxesEnableKeybind] then
+        if not HitBoxesEnabled then
+            debugPrint("HitBoxes enable key pressed - Enabling hitboxes", "INPUT")
             enableHitboxes()
             task.spawn(function()
                 showNotification("HitBoxes enabled", 2)
+            end)
+        end
+
+    elseif input.KeyCode == Enum.KeyCode[Settings.HitBoxesDisableKeybind] then
+        if HitBoxesEnabled then
+            debugPrint("HitBoxes disable key pressed - Disabling hitboxes", "INPUT")
+            disableHitboxes()
+            task.spawn(function()
+                showNotification("HitBoxes disabled", 2)
             end)
         end
 
