@@ -749,7 +749,7 @@ local Settings = {
     ProjectileAimbotPlayers = true,
     ProjectileAimbotWalls = false,
     ProjectileAimbotNPCs = false,
-    GUIEnabled = true,
+    GUIEnabled = false,
     UninjectKeybind = "RightAlt",
     DebugMode = false, -- for aero to debug shi
 }
