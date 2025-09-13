@@ -751,7 +751,7 @@ local Settings = {
     ProjectileAimbotNPCs = false,
     GUIEnabled = false,
     UninjectKeybind = "RightAlt",
-    DebugMode = false, -- for aero to debug shi
+    DebugMode = true, -- for aero to debug shi
 }
 
 pcall(function()
@@ -1450,13 +1450,22 @@ local originalFunctions = {}
 local OldGet = nil
 
 local function hookClientGet()
-    if not bedwars.Client or OldGet then return end
+    if not bedwars.Client then 
+        debugPrint("hookClientGet() failed: bedwars.Client not available", "HITFIX")
+        return false
+    end
+    
+    if OldGet then 
+        debugPrint("hookClientGet() skipped: Already hooked", "HITFIX")
+        return true  -- Already hooked, return success
+    end
     
     OldGet = bedwars.Client.Get
     bedwars.Client.Get = function(self, remoteName)
         local call = OldGet(self, remoteName)
         
         if remoteName == (remotes and remotes.AttackEntity or "AttackEntity") then
+            debugPrint("Intercepted AttackEntity remote: " .. tostring(remoteName), "HITFIX")
             return {
                 instance = call.instance,
                 SendToServer = function(_, attackTable, ...)
@@ -1465,12 +1474,19 @@ local function hookClientGet()
                         local targetpos = attackTable.validate.targetPosition and attackTable.validate.targetPosition.value
                         
                         if selfpos and targetpos then
-                            store.attackReach = ((selfpos - targetpos).Magnitude * 100) // 1 / 100
+                            local distance = (selfpos - targetpos).Magnitude
+                            store.attackReach = math.floor(distance * 100) / 100
                             store.attackReachUpdate = tick() + 1
                             
                             if HitFixEnabled then
+                                -- More sophisticated position adjustment
                                 attackTable.validate.raycast = attackTable.validate.raycast or {}
-                                attackTable.validate.selfPosition.value = selfpos + CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
+                                local direction = (targetpos - selfpos).Unit
+                                local adjustedDistance = math.max(distance - 14.2, 0)
+                                attackTable.validate.selfPosition.value = selfpos + (direction * adjustedDistance)
+                                
+                                debugPrint(string.format("Adjusted attack position - Original: %.2f, Adjusted: %.2f", 
+                                    distance, adjustedDistance), "HITFIX")
                             end
                         end
                     end
@@ -1481,6 +1497,8 @@ local function hookClientGet()
         
         return call
     end
+    debugPrint("Client Get hook installed successfully", "HITFIX")
+    return true
 end
 
 local originalReachDistance = nil
@@ -1488,57 +1506,107 @@ local REACH_DISTANCE = 18
 local remotes = {}
 
 local function setupHitFix()
-    if not bedwarsLoaded or not swordController then return false end
+    if not bedwarsLoaded or not swordController then 
+        debugPrint("setupHitFix() failed: bedwars not loaded or SwordController missing", "HITFIX")
+        return false 
+    end
 
+    if not bedwars.SwordController.swingSwordInRegion then
+        debugPrint("setupHitFix() failed: swingSwordInRegion function not found", "HITFIX")
+        return false
+    end
+
+    local successCount = 0
+    local totalAttempts = 0
+
+    -- 1. Function Hooking (More comprehensive)
     local function applyFunctionHook(enabled)
-        if enabled then
-            local functions = {"swingSwordAtMouse", "swingSwordInRegion", "attackEntity"}
-            for _, funcName in functions do
-                local original = swordController[funcName]
-                if original and not originalFunctions[funcName] then
-                    originalFunctions[funcName] = original
-                    swordController[funcName] = function(self, ...)
-                        local args = {...}
-                        for i, arg in pairs(args) do
-                            if type(arg) == "table" and arg.validate then
-                                args[i].validate = nil
+        totalAttempts = totalAttempts + 1
+        local functionsToHook = {"swingSwordAtMouse", "swingSwordInRegion", "attackEntity", "sendServerRequest"}
+        
+        for _, funcName in ipairs(functionsToHook) do
+            if swordController[funcName] and type(swordController[funcName]) == "function" then
+                if enabled then
+                    if not originalFunctions[funcName] then
+                        originalFunctions[funcName] = swordController[funcName]
+                        swordController[funcName] = function(self, ...)
+                            local args = {...}
+                            for i, arg in ipairs(args) do
+                                if type(arg) == "table" and arg.validate then
+                                    -- Remove validation for better consistency
+                                    args[i].validate = nil
+                                    debugPrint("Removed validation from " .. funcName, "HITFIX")
+                                end
                             end
+                            return originalFunctions[funcName](self, unpack(args))
                         end
-                        return original(self, unpack(args))
+                        debugPrint("Hooked function: " .. funcName, "HITFIX")
+                        successCount = successCount + 1
+                    end
+                else
+                    if originalFunctions[funcName] then
+                        swordController[funcName] = originalFunctions[funcName]
+                        originalFunctions[funcName] = nil
+                        debugPrint("Restored function: " .. funcName, "HITFIX")
                     end
                 end
             end
-        else
-            for funcName, original in pairs(originalFunctions) do
-                swordController[funcName] = original
-            end
-            originalFunctions = {}
         end
+        return true
     end
 
+    -- 2. Improved Debug Patch (More reliable)
     local function applyDebugPatch(enabled)
+        totalAttempts = totalAttempts + 1
         local success = pcall(function()
             if swordController and swordController.swingSwordAtMouse then
-                debug.setconstant(swordController.swingSwordAtMouse, 23, enabled and 'raycast' or 'Raycast')
-                debug.setupvalue(swordController.swingSwordAtMouse, 4, enabled and bedwars.QueryUtil or workspace)
+                local constants = debug.getconstants(swordController.swingSwordAtMouse)
+                for i, constant in ipairs(constants) do
+                    if tostring(constant) == "Raycast" then
+                        debug.setconstant(swordController.swingSwordAtMouse, i, enabled and 'raycast' or 'Raycast')
+                        debugPrint("Modified constant at index " .. i .. " from 'Raycast' to 'raycast'", "HITFIX")
+                        successCount = successCount + 1
+                        break
+                    end
+                end
+
+                -- Update query utility reference
+                local upvalues = debug.getupvalues(swordController.swingSwordAtMouse)
+                for i, upvalue in ipairs(upvalues) do
+                    if type(upvalue) == "table" and upvalue.blockCast then
+                        debug.setupvalue(swordController.swingSwordAtMouse, i, enabled and bedwars.QueryUtil or workspace)
+                        debugPrint("Updated query utility reference", "HITFIX")
+                        successCount = successCount + 1
+                        break
+                    end
+                end
             end
         end)
         return success
     end
 
+    -- 3. Smart Reach Adjustment (Less aggressive)
     local function applyReach(enabled)
+        totalAttempts = totalAttempts + 1
         local success = pcall(function()
             if bedwars and bedwars.CombatConstant then
                 if enabled then
                     if originalReachDistance == nil then
                         originalReachDistance = bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE
+                        debugPrint("Original reach distance: " .. tostring(originalReachDistance), "HITFIX")
                     end
-                    bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = 18 + 2
+                    
+                    -- More subtle reach increase to avoid detection
+                    local newReach = originalReachDistance + 1.8  -- Reduced from +2 to +1.8
+                    bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = newReach
+                    debugPrint("Increased reach to: " .. tostring(newReach), "HITFIX")
                 else
                     if originalReachDistance ~= nil then
                         bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = originalReachDistance
+                        debugPrint("Restored original reach: " .. tostring(originalReachDistance), "HITFIX")
                     end
                 end
+                successCount = successCount + 1
                 return true
             end
             return false
@@ -1546,30 +1614,85 @@ local function setupHitFix()
         return success
     end
 
-    if hitfixOriginalState == nil then
-        hitfixOriginalState = false
+    -- 4. Additional validation removal
+    local function removeAdditionalValidation()
+        totalAttempts = totalAttempts + 1
+        local success = pcall(function()
+            -- Look for validation functions in various places
+            local validationTargets = {
+                swordController,
+                bedwars.SwordController,
+                getmetatable(swordController).__index
+            }
+            
+            for _, target in ipairs(validationTargets) do
+                if target and target.validateAttack then
+                    local originalValidate = target.validateAttack
+                    target.validateAttack = function(...)
+                        debugPrint("Bypassed attack validation", "HITFIX")
+                        return true  -- Always return true to bypass validation
+                    end
+                    successCount = successCount + 1
+                    break
+                end
+            end
+        end)
+        return success
     end
 
-    hookClientGet()
-    local hookSuccess = pcall(function() applyFunctionHook(HitFixEnabled) end)
-    local debugSuccess = applyDebugPatch(HitFixEnabled)
-    local reachSuccess = applyReach(HitFixEnabled)
+    -- Execute all methods
+    local results = {
+        applyFunctionHook(HitFixEnabled),
+        applyDebugPatch(HitFixEnabled),
+        applyReach(HitFixEnabled)
+    }
+    
+    -- Only attempt validation removal if hitfix is enabled
+    if HitFixEnabled then
+        table.insert(results, removeAdditionalValidation())
+    end
 
+    -- Calculate success rate
+    local successRate = successCount / totalAttempts * 100
+    debugPrint(string.format("HitFix setup complete - Success: %d/%d (%.1f%%)", 
+        successCount, totalAttempts, successRate), "HITFIX")
 
-    return hookSuccess and reachSuccess
+    -- Enable client-side hit validation bypass (only if not already hooked)
+    if HitFixEnabled and successRate > 50 and not OldGet then
+        pcall(function()
+            local hookResult = hookClientGet()
+            debugPrint("Client Get hook result: " .. tostring(hookResult), "HITFIX")
+            if hookResult then
+                successCount = successCount + 1
+                totalAttempts = totalAttempts + 1
+            end
+        end)
+    end
+
+    return successRate > 50
 end
 
 local function enableHitFix()
-    if not bedwarsLoaded then return false end
+    debugPrint("enableHitFix() called - Current state: " .. tostring(HitFixEnabled), "HITFIX")
+    if not bedwarsLoaded then 
+        debugPrint("enableHitFix() failed: bedwars not loaded", "HITFIX")
+        return false 
+    end
     HitFixEnabled = true
     local success = setupHitFix()
+    debugPrint("enableHitFix() completed - Success: " .. tostring(success), "HITFIX")
     return success
 end
 
 local function disableHitFix()
-    if not bedwarsLoaded then return false end
+    debugPrint("disableHitFix() called - Current state: " .. tostring(HitFixEnabled), "HITFIX")
+    if not bedwarsLoaded then 
+        debugPrint("disableHitFix() failed: bedwars not loaded", "HITFIX")
+        return false 
+    end
     HitFixEnabled = false
     local success = setupHitFix()
+    debugPrint("disableHitFix() completed - Success: " .. tostring(success), "HITFIX")
     return success
 end
 
