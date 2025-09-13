@@ -1457,7 +1457,7 @@ local function hookClientGet()
     
     if OldGet then 
         debugPrint("hookClientGet() skipped: Already hooked", "HITFIX")
-        return true  -- Already hooked, return success
+        return true 
     end
     
     OldGet = bedwars.Client.Get
@@ -1479,7 +1479,6 @@ local function hookClientGet()
                             store.attackReachUpdate = tick() + 1
                             
                             if HitFixEnabled then
-                                -- More sophisticated position adjustment
                                 attackTable.validate.raycast = attackTable.validate.raycast or {}
                                 local direction = (targetpos - selfpos).Unit
                                 local adjustedDistance = math.max(distance - 14.2, 0)
@@ -1519,7 +1518,6 @@ local function setupHitFix()
     local successCount = 0
     local totalAttempts = 0
 
-    -- 1. Function Hooking (More comprehensive)
     local function applyFunctionHook(enabled)
         totalAttempts = totalAttempts + 1
         local functionsToHook = {"swingSwordAtMouse", "swingSwordInRegion", "attackEntity", "sendServerRequest"}
@@ -1533,7 +1531,6 @@ local function setupHitFix()
                             local args = {...}
                             for i, arg in ipairs(args) do
                                 if type(arg) == "table" and arg.validate then
-                                    -- Remove validation for better consistency
                                     args[i].validate = nil
                                     debugPrint("Removed validation from " .. funcName, "HITFIX")
                                 end
@@ -1555,7 +1552,6 @@ local function setupHitFix()
         return true
     end
 
-    -- 2. Improved Debug Patch (More reliable)
     local function applyDebugPatch(enabled)
         totalAttempts = totalAttempts + 1
         local success = pcall(function()
@@ -1570,7 +1566,6 @@ local function setupHitFix()
                     end
                 end
 
-                -- Update query utility reference
                 local upvalues = debug.getupvalues(swordController.swingSwordAtMouse)
                 for i, upvalue in ipairs(upvalues) do
                     if type(upvalue) == "table" and upvalue.blockCast then
@@ -1585,7 +1580,6 @@ local function setupHitFix()
         return success
     end
 
-    -- 3. Smart Reach Adjustment (Less aggressive)
     local function applyReach(enabled)
         totalAttempts = totalAttempts + 1
         local success = pcall(function()
@@ -1596,8 +1590,7 @@ local function setupHitFix()
                         debugPrint("Original reach distance: " .. tostring(originalReachDistance), "HITFIX")
                     end
                     
-                    -- More subtle reach increase to avoid detection
-                    local newReach = originalReachDistance + 1.8  -- Reduced from +2 to +1.8
+                    local newReach = originalReachDistance + 1.8 
                     bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = newReach
                     debugPrint("Increased reach to: " .. tostring(newReach), "HITFIX")
                 else
@@ -1614,11 +1607,9 @@ local function setupHitFix()
         return success
     end
 
-    -- 4. Additional validation removal
     local function removeAdditionalValidation()
         totalAttempts = totalAttempts + 1
         local success = pcall(function()
-            -- Look for validation functions in various places
             local validationTargets = {
                 swordController,
                 bedwars.SwordController,
@@ -1630,7 +1621,7 @@ local function setupHitFix()
                     local originalValidate = target.validateAttack
                     target.validateAttack = function(...)
                         debugPrint("Bypassed attack validation", "HITFIX")
-                        return true  -- Always return true to bypass validation
+                        return true
                     end
                     successCount = successCount + 1
                     break
@@ -1640,24 +1631,20 @@ local function setupHitFix()
         return success
     end
 
-    -- Execute all methods
     local results = {
         applyFunctionHook(HitFixEnabled),
         applyDebugPatch(HitFixEnabled),
         applyReach(HitFixEnabled)
     }
     
-    -- Only attempt validation removal if hitfix is enabled
     if HitFixEnabled then
         table.insert(results, removeAdditionalValidation())
     end
 
-    -- Calculate success rate
     local successRate = successCount / totalAttempts * 100
     debugPrint(string.format("HitFix setup complete - Success: %d/%d (%.1f%%)", 
         successCount, totalAttempts, successRate), "HITFIX")
 
-    -- Enable client-side hit validation bypass (only if not already hooked)
     if HitFixEnabled and successRate > 50 and not OldGet then
         pcall(function()
             local hookResult = hookClientGet()
@@ -1769,8 +1756,17 @@ local function createHitbox(ent)
     
     if ent.Targetable and ent.Player then
         local success = pcall(function()
+            local baseSize = Vector3.new(3, 6, 3)
+            if ent.Character and ent.Character:FindFirstChild("Humanoid") then
+                local humanoid = ent.Character.Humanoid
+                baseSize = Vector3.new(3, humanoid.HipHeight * 2 + 2, 3)
+            end
+            
+            local expansionFactor = math.clamp(Settings.HitBoxesExpandAmount, 0, 400) / 20
+            local hitboxSize = baseSize + Vector3.one * expansionFactor
+            
             local hitbox = Instance.new('Part')
-            hitbox.Size = Vector3.new(3, 6, 3) + Vector3.one * (Settings.HitBoxesExpandAmount / 5)
+            hitbox.Size = hitboxSize
             hitbox.Position = ent.RootPart.Position
             hitbox.CanCollide = false
             hitbox.Massless = true
@@ -1783,11 +1779,13 @@ local function createHitbox(ent)
             weld.Parent = hitbox
             
             hitboxObjects[ent] = hitbox
-            debugPrint(string.format("Created hitbox for %s with size: %s", ent.Player.Name, tostring(hitbox.Size)), "HITBOX")
+            debugPrint(string.format("Created hitbox for %s with size: %s (Expansion: %d)", 
+                ent.Player.Name, tostring(hitbox.Size), Settings.HitBoxesExpandAmount), "HITBOX")
         end)
         
         if not success then
-            debugPrint(string.format("Failed to create hitbox for %s", ent.Player and ent.Player.Name or "unknown"), "HITBOX")
+            debugPrint(string.format("Failed to create hitbox for %s: %s", 
+                ent.Player and ent.Player.Name or "unknown", tostring(success)), "HITBOX")
         end
     end
 end
@@ -1813,38 +1811,102 @@ local function applySwordHitbox(enabled)
     
     local success, errorMsg = pcall(function()
         if enabled then
-            debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (Settings.HitBoxesExpandAmount / 3))
-            hitboxSet = true
-            debugPrint(string.format("Applied sword hitbox with range: %.2f", Settings.HitBoxesExpandAmount / 3), "HITBOX")
+            local constants = debug.getconstants(bedwars.SwordController.swingSwordInRegion)
+            local modified = false
+            
+            for i, constant in ipairs(constants) do
+                if type(constant) == "number" and (constant == 3.8 or constant == 4.0 or constant == 3.5) then
+                    local newReach = math.clamp(Settings.HitBoxesExpandAmount / 2, 4, 50)
+                    debug.setconstant(bedwars.SwordController.swingSwordInRegion, i, newReach)
+                    debugPrint(string.format("Modified sword reach at index %d: %.2f -> %.2f", i, constant, newReach), "HITBOX")
+                    modified = true
+                end
+            end
+            
+            if not modified then
+                for i = 1, #constants do
+                    if type(debug.getconstant(bedwars.SwordController.swingSwordInRegion, i)) == "number" then
+                        local currentValue = debug.getconstant(bedwars.SwordController.swingSwordInRegion, i)
+                        if currentValue > 2 and currentValue < 10 then
+                            local newReach = math.clamp(Settings.HitBoxesExpandAmount / 2, 4, 50)
+                            debug.setconstant(bedwars.SwordController.swingSwordInRegion, i, newReach)
+                            debugPrint(string.format("Fallback modified sword reach at index %d: %.2f -> %.2f", 
+                                i, currentValue, newReach), "HITBOX")
+                            modified = true
+                            break
+                        end
+                    end
+                end
+            end
+            
+            if modified then
+                hitboxSet = true
+                debugPrint("Sword hitbox applied successfully", "HITBOX")
+            else
+                debugPrint("Could not find sword reach constant to modify", "HITBOX")
+            end
+            
         else
-            debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
+            if originalReachDistance ~= nil then
+                local constants = debug.getconstants(bedwars.SwordController.swingSwordInRegion)
+                for i, constant in ipairs(constants) do
+                    if type(constant) == "number" and constant ~= originalReachDistance then
+                        debug.setconstant(bedwars.SwordController.swingSwordInRegion, i, originalReachDistance)
+                        debugPrint(string.format("Restored sword reach at index %d: %.2f -> %.2f", 
+                            i, constant, originalReachDistance), "HITBOX")
+                    end
+                end
+            end
             hitboxSet = nil
-            debugPrint("Removed sword hitbox, restored to 3.8", "HITBOX")
+            debugPrint("Sword hitbox disabled", "HITBOX")
         end
     end)
     
     if not success then
-        debugPrint("applySwordHitbox() failed to modify swingSwordInRegion: " .. tostring(errorMsg), "HITBOX")
+        debugPrint("applySwordHitbox() failed: " .. tostring(errorMsg), "HITBOX")
     end
     
     return success
 end
 
 local function updatePlayerHitboxes()
+    debugPrint(string.format("Updating player hitboxes for %d entities", table.count(hitboxObjects)), "HITBOX")
+    
     for ent, part in pairs(hitboxObjects) do
         if part and part.Parent then
-            part.Size = Vector3.new(3, 6, 3) + Vector3.one * (Settings.HitBoxesExpandAmount / 5)
-            debugPrint(string.format("Updated hitbox size for %s: %s", ent.Player.Name, tostring(part.Size)), "HITBOX")
+            local baseSize = Vector3.new(3, 6, 3)
+            if ent.Character and ent.Character:FindFirstChild("Humanoid") then
+                local humanoid = ent.Character.Humanoid
+                baseSize = Vector3.new(3, humanoid.HipHeight * 2 + 2, 3)
+            end
+            
+            local expansionFactor = math.clamp(Settings.HitBoxesExpandAmount, 0, 400) / 20
+            local newSize = baseSize + Vector3.one * expansionFactor
+            
+            part.Size = newSize
+            debugPrint(string.format("Updated hitbox for %s: %s (Expansion: %d)", 
+                ent.Player.Name, tostring(newSize), Settings.HitBoxesExpandAmount), "HITBOX")
+        else
+            hitboxObjects[ent] = nil
+            debugPrint("Removed invalid hitbox reference", "HITBOX")
         end
     end
+    
+    debugPrint("Player hitboxes update completed", "HITBOX")
 end
 
 local function enableHitboxes()
-    debugPrint(string.format("enableHitboxes() called - Mode: %s, Expand: %.2f", Settings.HitBoxesMode, Settings.HitBoxesExpandAmount), "HITBOX")
+    debugPrint(string.format("enableHitboxes() called - Mode: %s, Expand: %d, Current State: %s", 
+        Settings.HitBoxesMode, Settings.HitBoxesExpandAmount, tostring(HitBoxesEnabled)), "HITBOX")
+    
+    if HitBoxesEnabled then
+        debugPrint("Hitboxes already enabled, skipping", "HITBOX")
+        return true
+    end
     
     if not entitylib.Running then
+        debugPrint("Starting entitylib for hitboxes", "HITBOX")
         entitylib.start()
-        debugPrint("Started entitylib for hitboxes", "HITBOX")
     end
     
     if Settings.HitBoxesMode == 'Sword' then
@@ -1907,12 +1969,19 @@ end
 
 local function updateHitboxSettings()
     if HitBoxesEnabled then
-        if Settings.HitBoxesMode == 'Sword' and hitboxSet then
-            applySwordHitbox(true) 
+        debugPrint(string.format("Updating hitbox settings - Mode: %s, Expand: %d", 
+            Settings.HitBoxesMode, Settings.HitBoxesExpandAmount), "HITBOX")
+        
+        if Settings.HitBoxesMode == 'Sword' then
+            applySwordHitbox(true)
+            debugPrint("Sword hitbox settings updated", "HITBOX")
         elseif Settings.HitBoxesMode == 'Player' then
             updatePlayerHitboxes()
+            debugPrint("Player hitbox settings updated", "HITBOX")
         end
-        debugPrint(string.format("Updated hitbox settings - Mode: %s, Expand: %.2f", Settings.HitBoxesMode, Settings.HitBoxesExpandAmount), "HITBOX")
+        
+        debugPrint(string.format("Hitbox settings updated successfully - Mode: %s, Expand: %d", 
+            Settings.HitBoxesMode, Settings.HitBoxesExpandAmount), "HITBOX")
     end
 end
 
