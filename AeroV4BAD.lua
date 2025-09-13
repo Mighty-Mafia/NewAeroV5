@@ -722,7 +722,7 @@ repeat task.wait() until game:IsLoaded()
 local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Player", -- "Sword" or "Player"
-    HitBoxesExpandAmount = 70, 
+    HitBoxesExpandAmount = 80, 
     HitBoxesEnabled = true, 
     HitBoxesEnableKeybind = "Z",  
     HitBoxesDisableKeybind = "X", 
@@ -731,8 +731,8 @@ local Settings = {
     AutoChargeBowEnabled = false,
     AutoToolEnabled = true,
     VelocityEnabled = true,
-    VelocityHorizontal = 65,
-    VelocityVertical = 65,
+    VelocityHorizontal = 85,
+    VelocityVertical = 85,
     VelocityChance = 100,
     VelocityTargetCheck = false,
     FastBreakEnabled = true,
@@ -751,7 +751,7 @@ local Settings = {
     ProjectileAimbotNPCs = false,
     GUIEnabled = false,
     UninjectKeybind = "RightAlt",
-    DebugMode = true, -- for aero to debug shi
+    DebugMode = false, -- for aero to debug shi
 }
 
 pcall(function()
