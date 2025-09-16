@@ -930,25 +930,6 @@ local function getSword()
     return bestSword, bestSwordSlot
 end
 
-local function hasSwordEquipped()
-    if not store.inventory or not store.inventory.hotbar then 
-        return false 
-    end
-    
-    local hotbarSlot = store.inventory.hotbarSlot
-    if not hotbarSlot or not store.inventory.hotbar[hotbarSlot + 1] then 
-        return false 
-    end
-    
-    local currentItem = store.inventory.hotbar[hotbarSlot + 1].item
-    if not currentItem then 
-        return false 
-    end
-    
-    local itemMeta = bedwars.ItemMeta[currentItem.itemType]
-    return itemMeta and itemMeta.sword ~= nil
-end
-
 local function getTool(breakType)
     local bestTool, bestToolSlot, bestToolDamage = nil, nil, 0
     for slot, item in store.inventory.inventory.items do
@@ -1617,11 +1598,6 @@ local hitboxSet = nil
 local hitboxConnections = {}
 local HitBoxesEnabled = false
 
-local autoHitboxEnabled = false
-local lastSwordState = false
-local hitboxCheckConnection = nil
-local storeChangedConnection = nil
-
 local FastBreakEnabled = false
 
 local ProjectileAimbotEnabled = false
@@ -1729,7 +1705,6 @@ local function enableHitboxes()
         if success then
             HitBoxesEnabled = true
             debugPrint("Sword hitboxes enabled successfully", "HITBOX")
-            showNotification("HitBoxes enabled (Sword detected)", 2)
             return true
         else
             debugPrint("Failed to enable sword hitboxes", "HITBOX")
@@ -1749,7 +1724,6 @@ local function enableHitboxes()
         
         HitBoxesEnabled = true
         debugPrint(string.format("Player hitboxes enabled successfully - Created %d hitboxes", #hitboxObjects), "HITBOX")
-        showNotification("HitBoxes enabled", 2)
         return true
     end
 end
@@ -1778,7 +1752,6 @@ local function disableHitboxes()
     
     HitBoxesEnabled = false
     debugPrint("Hitboxes disabled successfully", "HITBOX")
-    showNotification("HitBoxes disabled (No sword)", 2)
     return true
 end
 
@@ -2644,70 +2617,19 @@ local function disableProjectileAimbot()
     return success
 end
 
-local autoHitboxEnabled = false
-local lastSwordState = false
-local hitboxCheckConnection = nil
-
-local function setupAutoHitboxToggle()
-    if hitboxCheckConnection then
-        hitboxCheckConnection:Disconnect()
-        hitboxCheckConnection = nil
-    end
-    
-    hitboxCheckConnection = mainRunService.Heartbeat:Connect(function()
-        if not Settings.HitBoxesEnabled or not autoHitboxEnabled then 
-            return 
-        end
-        
-        local hasSword = hasSwordEquipped()
-        
-        if hasSword ~= lastSwordState then
-            if hasSword then
-                if not HitBoxesEnabled then
-                    enableHitboxes()
-                end
-            else
-                if HitBoxesEnabled then
-                    disableHitboxes()
-                end
-            end
-            lastSwordState = hasSword
-        end
-    end)
-    
-    lastSwordState = hasSwordEquipped()
-    if lastSwordState and not HitBoxesEnabled then
-        enableHitboxes()
-    elseif not lastSwordState and HitBoxesEnabled then
-        disableHitboxes()
-    end
-end
-
-local function enableAutoHitbox()
-    if autoHitboxEnabled then return end
-    autoHitboxEnabled = true
-    setupAutoHitboxToggle()
-    debugPrint("Auto hitbox toggle enabled", "HITBOX")
-end
-
-local function disableAutoHitbox()
-    if not autoHitboxEnabled then return end
-    autoHitboxEnabled = false
-    if hitboxCheckConnection then
-        hitboxCheckConnection:Disconnect()
-        hitboxCheckConnection = nil
-    end
-    if storeChangedConnection then
-        storeChangedConnection:Disconnect()
-        storeChangedConnection = nil
-    end
-    debugPrint("Auto hitbox toggle disabled", "HITBOX")
-end
-
 local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
 
 local function enableAllFeatures()
+    debugPrint("enableAllFeatures() called", "DEBUG")
+    debugPrint("Projectile Aimbot Settings:", "DEBUG")
+    debugPrint("  FOV: " .. Settings.ProjectileAimbotFOV, "DEBUG")
+    debugPrint("  TargetPart: " .. Settings.ProjectileAimbotTargetPart, "DEBUG")
+    debugPrint("  OtherProjectiles: " .. tostring(Settings.ProjectileAimbotOtherProjectiles), "DEBUG")
+    debugPrint("  Players: " .. tostring(Settings.ProjectileAimbotPlayers), "DEBUG")
+    debugPrint("  Walls: " .. tostring(Settings.ProjectileAimbotWalls), "DEBUG")
+    debugPrint("  NPCs: " .. tostring(Settings.ProjectileAimbotNPCs), "DEBUG")
+    
     ProjectileAimbotSettings.FOV = Settings.ProjectileAimbotFOV
     ProjectileAimbotSettings.TargetPart = Settings.ProjectileAimbotTargetPart
     ProjectileAimbotSettings.OtherProjectiles = Settings.ProjectileAimbotOtherProjectiles
@@ -2725,11 +2647,9 @@ local function enableAllFeatures()
     if Settings.InstantPPEnabled then
         enableInstantPP()
     end
-    
     if Settings.HitBoxesEnabled then
-        enableAutoHitbox()
+        enableHitboxes()
     end
-    
     enableSprint()
     if Settings.HitFixEnabled then
         enableHitFix()
@@ -2760,12 +2680,7 @@ local function disableAllFeatures()
     disableKitESP()
     disableProjectileAimbot()
     disableInstantPP()
-    
-    disableAutoHitbox()
-    if HitBoxesEnabled then
-        disableHitboxes()
-    end
-    
+    disableHitboxes()
     disableSprint()
     disableHitFix()
     disableAutoChargeBow()
@@ -2866,6 +2781,11 @@ if bedwarsLoaded then
     setupHitFix()
 end
 
+debugPrint("Script initialization starting", "INIT")
+debugPrint(string.format("Bedwars loaded: %s", tostring(bedwarsLoaded)), "INIT")
+debugPrint(string.format("Velocity settings - H: %d%%, V: %d%%, Chance: %d%%, TargetCheck: %s", 
+    Settings.VelocityHorizontal, Settings.VelocityVertical, Settings.VelocityChance, tostring(Settings.VelocityTargetCheck)), "INIT")
+
 enableAllFeatures()
 task.spawn(function()
     local statusMsg = "Script loaded and enabled. Press RightShift to toggle on/off."
@@ -2878,7 +2798,6 @@ end)
 
 addCleanupFunction(function()
     disableAllFeatures()
-    disableAutoHitbox()
     table.clear(strafingPatterns)
     table.clear(movementHistory)
     pcall(function()
