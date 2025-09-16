@@ -1,8 +1,6 @@
 --[[
-
 	Universal Aimbot Module by Exunys © CC0 1.0 Universal (2023 - 2024)
 	https://github.com/Exunys
-
 ]]
 
 --// Cache
@@ -109,8 +107,8 @@ getgenv().ExunysDeveloperAimbot = {
 		LockMode = 1, -- 1 = CFrame; 2 = mousemoverel
 		LockPart = "Head", -- Body part to lock on
 
-		TriggerKey = Enum.UserInputType.MouseButton2,
-		Toggle = false
+		TriggerKey = Enum.KeyCode.G, -- Changed to G key
+		Toggle = true -- Changed to true for toggle mode
 	},
 
 	FOVSettings = {
@@ -299,7 +297,7 @@ local Load = function()
 			return
 		end
 
-		if Input.UserInputType == Enum.UserInputType.Keyboard and Input.KeyCode == TriggerKey or Input.UserInputType == TriggerKey then
+		if Input.UserInputType == Enum.UserInputType.Keyboard and Input.KeyCode == TriggerKey then
 			if Toggle then
 				Running = not Running
 
@@ -319,7 +317,7 @@ local Load = function()
 			return
 		end
 
-		if Input.UserInputType == Enum.UserInputType.Keyboard and Input.KeyCode == TriggerKey or Input.UserInputType == TriggerKey then
+		if Input.UserInputType == Enum.UserInputType.Keyboard and Input.KeyCode == TriggerKey then
 			Running = false
 			CancelLock()
 		end
@@ -398,4 +396,8 @@ Environment.Load = Load -- ExunysDeveloperAimbot.Load()
 
 setmetatable(Environment, {__call = Load})
 
-return Environment
+-- Load the aimbot
+Environment:Load()
+
+-- Optional: Print confirmation message
+print("Aimbot loaded! Press G to toggle on/off")
