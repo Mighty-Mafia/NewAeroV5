@@ -721,7 +721,7 @@ repeat task.wait() until game:IsLoaded()
 -- Settings (you can change these values)
 local Settings = {
     ToggleKeybind = "RightShift",
-    HitBoxesMode = "Player",
+    HitBoxesMode = "Player", -- "Sword" or "Player"
     HitBoxesExpandAmount = 70, 
     HitBoxesEnabled = true, 
     HitBoxesEnableKeybind = "Z",  
@@ -738,7 +738,7 @@ local Settings = {
     FastBreakEnabled = true,
     FastBreakSpeed = 0.21,
     NoFallEnabled = true,
-    NoFallMode = "Packet",
+    NoFallMode = "Packet", -- "Packet", "Gravity", "Teleport", "Bounce"
     NoSlowdownEnabled = true,
     KitESPEnabled = true,
     ProjectileAimbotEnabled = true,
@@ -749,14 +749,9 @@ local Settings = {
     ProjectileAimbotPlayers = true,
     ProjectileAimbotWalls = false,
     ProjectileAimbotNPCs = false,
-    TriggerBotEnabled = true,
-    TriggerBotKeybind = "V",
-    TriggerBotSwingTime = 0.25,
-    TriggerBotMouseDown = false,
-    TriggerBotGUICheck = false,
-    GUIEnabled = false,
+    GUIEnabled = true,
     UninjectKeybind = "RightAlt",
-    DebugMode = false,
+    DebugMode = false, -- for aero to debug shi
 }
 
 pcall(function()
@@ -889,19 +884,6 @@ local Velocity = {
 local velocityOld = nil
 local rand = Random.new()
 
-local TriggerBot = {
-    Enabled = Settings.TriggerBotEnabled,
-    SwingTime = {Value = Settings.TriggerBotSwingTime},
-    Mouse = {Enabled = Settings.TriggerBotMouseDown},
-    GUI = {Enabled = Settings.TriggerBotGUICheck},
-    UseHitbox = true,
-    UseReach = true,
-    UseHitfix = true
-}
-local triggerBotLoop = nil
-local swingCooldown = 0
-local rayParams = RaycastParams.new()
-
 local bedwars = {}
 local remotes = {}
 local store = {
@@ -946,25 +928,6 @@ local function getSword()
         end
     end
     return bestSword, bestSwordSlot
-end
-
-local function hasSwordEquipped()
-    if not store.inventory or not store.inventory.hotbar then 
-        return false 
-    end
-    
-    local hotbarSlot = store.inventory.hotbarSlot
-    if not hotbarSlot or not store.inventory.hotbar[hotbarSlot + 1] then 
-        return false 
-    end
-    
-    local currentItem = store.inventory.hotbar[hotbarSlot + 1].item
-    if not currentItem then 
-        return false 
-    end
-    
-    local itemMeta = bedwars.ItemMeta[currentItem.itemType]
-    return itemMeta and itemMeta.sword ~= nil
 end
 
 local function getTool(breakType)
@@ -1092,72 +1055,7 @@ local function entityPosition(options)
     return closest
 end
 
-local function getCurrentWeaponRange()
-    if not store.inventory or not store.inventory.hotbar then 
-        return 14.4
-    end
-    
-    local hotbarSlot = store.inventory.hotbarSlot
-    if not hotbarSlot or not store.inventory.hotbar[hotbarSlot + 1] then 
-        return 14.4
-    end
-    
-    local currentItem = store.inventory.hotbar[hotbarSlot + 1].item
-    if not currentItem then 
-        return 14.4
-    end
-    
-    local itemMeta = bedwars.ItemMeta[currentItem.itemType]
-    local baseRange = 14.4
-    
-    if itemMeta and itemMeta.sword then
-        baseRange = itemMeta.sword.attackRange or 14.4
-    end
-    
-    local finalRange = baseRange
-    if HitFixEnabled and bedwars.CombatConstant then
-        local currentReach = bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE
-        local originalReach = originalReachDistance or 3.8
-        local reachBonus = currentReach - originalReach
-        finalRange = baseRange + reachBonus
-    end
-    
-    return finalRange
-end
 
-local function getEntityUnderMouse(range)
-    if not entitylib.isAlive then return nil end
-    
-    local mousePos = getMousePosition()
-    local closestEntity = nil
-    local closestDistance = range or math.huge
-    
-    for _, entity in pairs(entitylib.List) do
-        if entity.Targetable and entity.Character and entity.RootPart then
-            local targetPosition = entity.RootPart.Position
-            local hitboxSize = Vector3.new(3, 6, 3)
-            
-            if TriggerBot.UseHitbox and HitBoxesEnabled and hitboxObjects[entity] then
-                targetPosition = hitboxObjects[entity].Position
-                hitboxSize = hitboxObjects[entity].Size
-            end
-            
-            local screenPos, visible = gameCamera:WorldToViewportPoint(targetPosition)
-            
-            if visible then
-                local distance = (Vector2.new(mousePos.X, mousePos.Y) - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
-                local detectionRadius = 60 + (hitboxSize.X * 2)
-                
-                if distance <= detectionRadius and distance < closestDistance then
-                    closestEntity = entity
-                    closestDistance = distance
-                end
-            end
-        end
-    end
-    
-    return closestEntity
-end
 
 local function setupBedwars()
     if not knit then return false end
@@ -1700,11 +1598,6 @@ local hitboxSet = nil
 local hitboxConnections = {}
 local HitBoxesEnabled = false
 
-local autoHitboxEnabled = false
-local lastSwordState = false
-local hitboxCheckConnection = nil
-local storeChangedConnection = nil
-
 local FastBreakEnabled = false
 
 local ProjectileAimbotEnabled = false
@@ -1812,7 +1705,6 @@ local function enableHitboxes()
         if success then
             HitBoxesEnabled = true
             debugPrint("Sword hitboxes enabled successfully", "HITBOX")
-            showNotification("HitBoxes enabled (Sword detected)", 2)
             return true
         else
             debugPrint("Failed to enable sword hitboxes", "HITBOX")
@@ -1832,7 +1724,6 @@ local function enableHitboxes()
         
         HitBoxesEnabled = true
         debugPrint(string.format("Player hitboxes enabled successfully - Created %d hitboxes", #hitboxObjects), "HITBOX")
-        showNotification("HitBoxes enabled", 2)
         return true
     end
 end
@@ -1861,64 +1752,7 @@ local function disableHitboxes()
     
     HitBoxesEnabled = false
     debugPrint("Hitboxes disabled successfully", "HITBOX")
-    showNotification("HitBoxes disabled (No sword)", 2)
     return true
-end
-
-local function setupAutoHitboxToggle()
-    if hitboxCheckConnection then
-        hitboxCheckConnection:Disconnect()
-        hitboxCheckConnection = nil
-    end
-    
-    hitboxCheckConnection = mainRunService.Heartbeat:Connect(function()
-        if not Settings.HitBoxesEnabled or not autoHitboxEnabled then 
-            return 
-        end
-        
-        local hasSword = hasSwordEquipped()
-        
-        if hasSword ~= lastSwordState then
-            if hasSword then
-                if not HitBoxesEnabled then
-                    enableHitboxes()
-                end
-            else
-                if HitBoxesEnabled then
-                    disableHitboxes()
-                end
-            end
-            lastSwordState = hasSword
-        end
-    end)
-    
-    lastSwordState = hasSwordEquipped()
-    if lastSwordState and not HitBoxesEnabled then
-        enableHitboxes()
-    elseif not lastSwordState and HitBoxesEnabled then
-        disableHitboxes()
-    end
-end
-
-local function enableAutoHitbox()
-    if autoHitboxEnabled then return end
-    autoHitboxEnabled = true
-    setupAutoHitboxToggle()
-    debugPrint("Auto hitbox toggle enabled", "HITBOX")
-end
-
-local function disableAutoHitbox()
-    if not autoHitboxEnabled then return end
-    autoHitboxEnabled = false
-    if hitboxCheckConnection then
-        hitboxCheckConnection:Disconnect()
-        hitboxCheckConnection = nil
-    end
-    if storeChangedConnection then
-        storeChangedConnection:Disconnect()
-        storeChangedConnection = nil
-    end
-    debugPrint("Auto hitbox toggle disabled", "HITBOX")
 end
 
 local function updateHitboxSettings()
@@ -2783,166 +2617,19 @@ local function disableProjectileAimbot()
     return success
 end
 
-local function enableTriggerBot()
-    if triggerBotLoop then 
-        task.cancel(triggerBotLoop)
-        triggerBotLoop = nil
-    end
-    
-    triggerBotLoop = task.spawn(function()
-        local loopCount = 0
-        
-        while TriggerBot.Enabled do
-            loopCount = loopCount + 1
-            local doAttack = false
-            local targetEntity = nil
-            
-            -- GUI Check Implementation (from 687 script)
-            if TriggerBot.GUI.Enabled then
-                pcall(function()
-                    if bedwars and bedwars.AppController and bedwars.AppController:isLayerOpen(bedwars.UILayers.MAIN) then
-                        task.wait(0.016)
-                        return
-                    end
-                end)
-            end
-            
-            if TriggerBot.Mouse.Enabled then
-                if not inputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-                    task.wait(0.016)
-                    continue
-                end
-            end
-            
-            if not entitylib.isAlive or not entitylib.character or not entitylib.character.RootPart then
-                task.wait(0.1)
-                continue
-            end
-            
-            local hasSword = hasSwordEquipped()
-            if not hasSword then
-                task.wait(0.1)
-                continue
-            end
-            
-            pcall(function()
-                if bedwars.DaoController and bedwars.DaoController.chargingMaid ~= nil then
-                    return
-                end
-            end)
-            
-            local attackRange = getCurrentWeaponRange()
-            local localPos = entitylib.character.RootPart.Position
-            
-            local mouseTarget = entityMouse({
-                Part = "RootPart",
-                Range = math.huge,
-                Players = true,
-                NPCs = true,
-                Origin = localPos,
-                Sort = function(a, b) return a.Magnitude < b.Magnitude end
-            })
-            
-            if mouseTarget and mouseTarget.Targetable and mouseTarget.RootPart then
-                local targetDistance = (localPos - mouseTarget.RootPart.Position).Magnitude
-                
-                if targetDistance <= attackRange then
-                    local canAttack = false
-                    if mouseTarget.Player and lplr.Team and mouseTarget.Player.Team then
-                        if mouseTarget.Player.Team ~= lplr.Team then
-                            canAttack = true
-                        end
-                    elseif not mouseTarget.Player then
-                        canAttack = true
-                    elseif not lplr.Team or not mouseTarget.Player.Team then
-                        canAttack = true
-                    end
-                    
-                    if canAttack then
-                        doAttack = true
-                        targetEntity = mouseTarget
-                    end
-                end
-            end
-            
-            if not doAttack then
-                local mouseLocation = inputService:GetMouseLocation()
-                local unitRay = gameCamera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
-                
-                rayParams.FilterDescendantsInstances = {lplr.Character, gameCamera}
-                rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-                
-                local ray = workspace:Raycast(unitRay.Origin, unitRay.Direction * (attackRange * 2), rayParams)
-                
-                if ray and ray.Instance then
-                    local rayDistance = (localPos - ray.Position).Magnitude
-                    
-                    if rayDistance <= attackRange then
-                        for _, ent in pairs(entitylib.List) do
-                            if ent.Targetable and ent.Character and ray.Instance:IsDescendantOf(ent.Character) then
-                                local canAttack = false
-                                if ent.Player and lplr.Team and ent.Player.Team then
-                                    if ent.Player.Team ~= lplr.Team then
-                                        canAttack = true
-                                    end
-                                elseif not ent.Player then
-                                    canAttack = true
-                                elseif not lplr.Team or not ent.Player.Team then
-                                    canAttack = true
-                                end
-                                
-                                if canAttack then
-                                    doAttack = true
-                                    targetEntity = ent
-                                    break
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            
-            if doAttack and bedwars.SwordController and bedwars.SwordController.swingSwordAtMouse then
-                if (tick() - swingCooldown) < math.max(TriggerBot.SwingTime.Value, 0.02) then
-                    task.wait(0.016)
-                    continue
-                end
-                
-                local success, err = pcall(function()
-                    bedwars.SwordController:swingSwordAtMouse()
-                end)
-                
-                swingCooldown = tick()
-                
-                if not success then
-                else
-                end
-                
-                task.wait(math.max(TriggerBot.SwingTime.Value, 0.02))
-            else
-                task.wait(0.016)
-            end
-        end
-    end)
-    
-    return true
-end
-
-local function disableTriggerBot()
-    if triggerBotLoop then
-        local success = pcall(function()
-            task.cancel(triggerBotLoop)
-        end)
-        triggerBotLoop = nil
-    end
-    
-    return true
-end
-
 local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
 
 local function enableAllFeatures()
+    debugPrint("enableAllFeatures() called", "DEBUG")
+    debugPrint("Projectile Aimbot Settings:", "DEBUG")
+    debugPrint("  FOV: " .. Settings.ProjectileAimbotFOV, "DEBUG")
+    debugPrint("  TargetPart: " .. Settings.ProjectileAimbotTargetPart, "DEBUG")
+    debugPrint("  OtherProjectiles: " .. tostring(Settings.ProjectileAimbotOtherProjectiles), "DEBUG")
+    debugPrint("  Players: " .. tostring(Settings.ProjectileAimbotPlayers), "DEBUG")
+    debugPrint("  Walls: " .. tostring(Settings.ProjectileAimbotWalls), "DEBUG")
+    debugPrint("  NPCs: " .. tostring(Settings.ProjectileAimbotNPCs), "DEBUG")
+    
     ProjectileAimbotSettings.FOV = Settings.ProjectileAimbotFOV
     ProjectileAimbotSettings.TargetPart = Settings.ProjectileAimbotTargetPart
     ProjectileAimbotSettings.OtherProjectiles = Settings.ProjectileAimbotOtherProjectiles
@@ -2960,21 +2647,15 @@ local function enableAllFeatures()
     if Settings.InstantPPEnabled then
         enableInstantPP()
     end
-    
     if Settings.HitBoxesEnabled then
-        enableAutoHitbox()
+        enableHitboxes()
     end
-    
     enableSprint()
     if Settings.HitFixEnabled then
         enableHitFix()
     end
     if Settings.AutoChargeBowEnabled then
         enableAutoChargeBow()
-    end
-    if Settings.TriggerBotEnabled then
-        TriggerBot.Enabled = true
-        enableTriggerBot()
     end
     if Settings.AutoToolEnabled then
         enableAutoTool()
@@ -2995,18 +2676,13 @@ local function enableAllFeatures()
 end
 
 local function disableAllFeatures()
+    debugPrint("disableAllFeatures() called", "DEBUG")
     disableKitESP()
     disableProjectileAimbot()
     disableInstantPP()
-    
-    disableAutoHitbox()
-    if HitBoxesEnabled then
-        disableHitboxes()
-    end
-    
+    disableHitboxes()
     disableSprint()
     disableHitFix()
-    disableTriggerBot()
     disableAutoChargeBow()
     disableAutoTool()
     disableVelocity()
@@ -3023,9 +2699,12 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
     if gameProcessed then return end
 
     if input.KeyCode == Enum.KeyCode[Settings.ToggleKeybind] then
+        debugPrint(string.format("Toggle key pressed - Current state: %s", tostring(allFeaturesEnabled)), "INPUT")
         if allFeaturesEnabled then
+            debugPrint("Disabling all features", "INPUT")
             disableAllFeatures()
         else
+            debugPrint("Enabling all features", "INPUT")
             enableAllFeatures()
             task.spawn(function()
                 showNotification("Script enabled. Press RightShift to disable.", 3)
@@ -3034,6 +2713,7 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
 
     elseif input.KeyCode == Enum.KeyCode[Settings.HitBoxesEnableKeybind] then
         if not HitBoxesEnabled then
+            debugPrint("HitBoxes enable key pressed - Enabling hitboxes", "INPUT")
             enableHitboxes()
             task.spawn(function()
                 showNotification("HitBoxes enabled", 2)
@@ -3042,6 +2722,7 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
 
     elseif input.KeyCode == Enum.KeyCode[Settings.HitBoxesDisableKeybind] then
         if HitBoxesEnabled then
+            debugPrint("HitBoxes disable key pressed - Disabling hitboxes", "INPUT")
             disableHitboxes()
             task.spawn(function()
                 showNotification("HitBoxes disabled", 2)
@@ -3050,31 +2731,16 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
 
     elseif input.KeyCode == Enum.KeyCode[Settings.ProjectileAimbotKeybind] then
         if ProjectileAimbotEnabled then
+            debugPrint("ProjectileAimbot key pressed - Disabling projectile aimbot", "INPUT")
             disableProjectileAimbot()
             task.spawn(function()
                 showNotification("Projectile Aimbot disabled", 2)
             end)
         else
+            debugPrint("ProjectileAimbot key pressed - Enabling projectile aimbot", "INPUT")
             enableProjectileAimbot()
             task.spawn(function()
                 showNotification("Projectile Aimbot enabled", 2)
-            end)
-        end
-
-    elseif input.KeyCode == Enum.KeyCode[Settings.TriggerBotKeybind] then
-        if TriggerBot.Enabled then
-            disableTriggerBot()
-            TriggerBot.Enabled = false
-            Settings.TriggerBotEnabled = false
-            task.spawn(function()
-                showNotification("TriggerBot disabled", 2)
-            end)
-        else
-            TriggerBot.Enabled = true
-            Settings.TriggerBotEnabled = true
-            enableTriggerBot()
-            task.spawn(function()
-                showNotification("TriggerBot enabled - Range: " .. string.format("%.1f", getCurrentWeaponRange()), 3)
             end)
         end
 
@@ -3115,6 +2781,11 @@ if bedwarsLoaded then
     setupHitFix()
 end
 
+debugPrint("Script initialization starting", "INIT")
+debugPrint(string.format("Bedwars loaded: %s", tostring(bedwarsLoaded)), "INIT")
+debugPrint(string.format("Velocity settings - H: %d%%, V: %d%%, Chance: %d%%, TargetCheck: %s", 
+    Settings.VelocityHorizontal, Settings.VelocityVertical, Settings.VelocityChance, tostring(Settings.VelocityTargetCheck)), "INIT")
+
 enableAllFeatures()
 task.spawn(function()
     local statusMsg = "Script loaded and enabled. Press RightShift to toggle on/off."
@@ -3127,8 +2798,6 @@ end)
 
 addCleanupFunction(function()
     disableAllFeatures()
-    disableTriggerBot()
-    disableAutoHitbox()
     table.clear(strafingPatterns)
     table.clear(movementHistory)
     pcall(function()
