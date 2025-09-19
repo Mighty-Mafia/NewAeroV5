@@ -8817,7 +8817,6 @@ run(function()
 		end
 	})
 end)
-
 run(function()
     local PromptButtonHoldBegan = nil
     local ProximityPromptService = cloneref(game:GetService('ProximityPromptService'))
