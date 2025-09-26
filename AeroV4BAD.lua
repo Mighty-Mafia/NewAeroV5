@@ -2099,7 +2099,7 @@ local function enableAimAssist()
             local hasSword = false
             if store and store.hand and store.hand.toolType == 'sword' then
                 hasSword = true
-            els
+            else
                 for slot, item in store.inventory.hotbar do
                     if item and item.item and bedwars.ItemMeta[item.item.itemType] and 
                        bedwars.ItemMeta[item.item.itemType].sword then
