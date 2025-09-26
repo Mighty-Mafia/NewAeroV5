@@ -749,6 +749,15 @@ local Settings = {
     ProjectileAimbotPlayers = true,
     ProjectileAimbotWalls = false,
     ProjectileAimbotNPCs = false,
+    AimAssistEnabled = true,
+    AimAssistTargetPlayers = true,
+    AimAssistTargetWalls = true,
+    AimAssistTargetMode = "Distance",
+    AimAssistAimSpeed = 1,
+    AimAssistDistance = 30,
+    AimAssistMaxAngle = 170,
+    AimAssistClickAim = false,
+    AimAssistStrafeIncrease = true,
     GUIEnabled = true,
     UninjectKeybind = "RightAlt",
     DebugMode = false, -- for aero to debug shi
@@ -2056,6 +2065,146 @@ local function disableFastBreak()
     return success
 end
 
+local AimAssistEnabled = false
+local aimAssistConnection = nil
+
+local sortmethods = {
+    Damage = function(a, b)
+        return a.Health < b.Health
+    end,
+    Distance = function(a, b)
+        return (a.RootPart.Position - entitylib.character.RootPart.Position).Magnitude < 
+               (b.RootPart.Position - entitylib.character.RootPart.Position).Magnitude
+    end,
+    Angle = function(a, b)
+        local selfrootpos = entitylib.character.RootPart.Position
+        local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
+        local angle = math.acos(localfacing:Dot(((a.RootPart.Position - selfrootpos) * Vector3.new(1, 0, 1)).Unit))
+        local angle2 = math.acos(localfacing:Dot(((b.RootPart.Position - selfrootpos) * Vector3.new(1, 0, 1)).Unit))
+        return angle < angle2
+    end
+}
+
+local function enableAimAssist()
+    if AimAssistEnabled or not bedwarsLoaded then return false end
+    
+    debugPrint("enableAimAssist() called", "DEBUG")
+    
+    local success = pcall(function()
+        AimAssistEnabled = true
+        
+        aimAssistConnection = mainRunService.Heartbeat:Connect(function(dt)
+            if not entitylib.isAlive then return end
+            
+            local hasSword = false
+            if store and store.hand and store.hand.toolType == 'sword' then
+                hasSword = true
+            els
+                for slot, item in store.inventory.hotbar do
+                    if item and item.item and bedwars.ItemMeta[item.item.itemType] and 
+                       bedwars.ItemMeta[item.item.itemType].sword then
+                        hasSword = true
+                        break
+                    end
+                end
+            end
+            
+            if not hasSword then return end
+            
+            if Settings.AimAssistClickAim then
+                local timeSinceLastSwing = tick() - (bedwars.SwordController.lastSwing or 0)
+                if timeSinceLastSwing > 0.4 then return end
+            end
+            
+            local target = nil
+            local targetsList = {}
+            
+            for _, entity in pairs(entitylib.List) do
+                if not entity.Targetable then continue end
+                if not Settings.AimAssistTargetPlayers and entity.Player then continue end
+                if not entitylib.isVulnerable(entity) then continue end
+                
+                local distance = (entity.RootPart.Position - entitylib.character.RootPart.Position).Magnitude
+                if distance > Settings.AimAssistDistance then continue end
+                
+                if Settings.AimAssistTargetWalls then
+                    local raycastParams = RaycastParams.new()
+                    raycastParams.FilterDescendantsInstances = {lplr.Character, entity.Character}
+                    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+                    
+                    local ray = workspace:Raycast(
+                        entitylib.character.RootPart.Position,
+                        (entity.RootPart.Position - entitylib.character.RootPart.Position),
+                        raycastParams
+                    )
+                    
+                    if ray and ray.Instance and not ray.Instance:IsDescendantOf(entity.Character) then
+                        continue
+                    end
+                end
+                
+                table.insert(targetsList, entity)
+            end
+            
+            if Settings.AimAssistTargetMode == "Damage" then
+                table.sort(targetsList, sortmethods.Damage)
+            elseif Settings.AimAssistTargetMode == "Angle" then
+                table.sort(targetsList, sortmethods.Angle)
+            else
+                table.sort(targetsList, sortmethods.Distance)
+            end
+            
+            if #targetsList > 0 then
+                target = targetsList[1]
+            end
+            
+            if target then
+                local delta = (target.RootPart.Position - entitylib.character.RootPart.Position)
+                local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
+                local angle = math.acos(localfacing:Dot((delta * Vector3.new(1, 0, 1)).Unit))
+                
+                if angle >= (math.rad(Settings.AimAssistMaxAngle) / 2) then return end
+                
+                local aimSpeed = Settings.AimAssistAimSpeed
+                if Settings.AimAssistStrafeIncrease and (mainInputService:IsKeyDown(Enum.KeyCode.A) or mainInputService:IsKeyDown(Enum.KeyCode.D)) then
+                    aimSpeed = aimSpeed + 10
+                end
+                
+                gameCamera.CFrame = gameCamera.CFrame:Lerp(
+                    CFrame.lookAt(gameCamera.CFrame.p, target.RootPart.Position), 
+                    aimSpeed * dt
+                )
+            end
+            
+            table.clear(targetsList)
+        end)
+        
+        debugPrint("AimAssist enabled successfully", "SUCCESS")
+    end)
+    
+    if not success then
+        debugPrint("enableAimAssist() failed", "ERROR")
+    end
+    
+    return success
+end
+
+local function disableAimAssist()
+    if not AimAssistEnabled then return false end
+    
+    debugPrint("disableAimAssist() called", "DEBUG")
+    
+    AimAssistEnabled = false
+    
+    if aimAssistConnection then
+        aimAssistConnection:Disconnect()
+        aimAssistConnection = nil
+    end
+    
+    debugPrint("AimAssist disabled successfully", "SUCCESS")
+    return true
+end
+
 local function enableNoFall()
     if NoFallEnabled or not bedwarsLoaded then return false end
     
@@ -2672,6 +2821,9 @@ local function enableAllFeatures()
     if Settings.NoSlowdownEnabled then
         enableNoSlowdown()
     end
+    if Settings.AimAssistEnabled then
+        enableAimAssist()
+    end
     allFeaturesEnabled = true
 end
 
@@ -2689,6 +2841,7 @@ local function disableAllFeatures()
     disableFastBreak()
     disableNoFall()
     disableNoSlowdown()
+    disableAimAssist()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -2841,6 +2994,13 @@ addCleanupFunction(function()
         table.clear(noFallConnections)
         if NoSlowdownEnabled then
             disableNoSlowdown()
+        end
+        if AimAssistEnabled then
+            disableAimAssist()
+        end
+        if aimAssistConnection then
+            aimAssistConnection:Disconnect()
+            aimAssistConnection = nil
         end
         for ent, part in pairs(hitboxObjects) do
             if part and part.Parent then
