@@ -715,6 +715,7 @@ local mainInputService = cloneref(game:GetService('UserInputService'))
 local mainTweenService = cloneref(game:GetService('TweenService'))
 local gameCamera = workspace.CurrentCamera
 local collectionService = cloneref(game:GetService('CollectionService'))
+local textService = cloneref(game:GetService('TextService'))
 
 repeat task.wait() until game:IsLoaded()
 
@@ -751,18 +752,18 @@ local Settings = {
     ProjectileAimbotNPCs = false,
     AimAssistEnabled = true,
     AimAssistTargetPlayers = true,
-    AimAssistTargetWalls = true,
+    AimAssistTargetWalls = false,
     AimAssistTargetMode = "Distance",
     AimAssistAimSpeed = 1,
     AimAssistDistance = 30,
     AimAssistMaxAngle = 170,
     AimAssistClickAim = false,
-    AimAssistStrafeIncrease = true,
+    AimAssistStrafeIncrease = false,
     StaffDetectorEnabled = true,
-    StaffDetectorLeaveParty = true,
+    StaffDetectorLeaveParty = false,
     StaffDetectorBlacklistClans = true,
     StaffDetectorMode = "Notify",
-    StaffDetectorDebugJoins = true,
+    StaffDetectorDebugJoins = false,
     GUIEnabled = true,
     UninjectKeybind = "RightAlt",
     DebugMode = false, -- for aero to debug shi
@@ -774,78 +775,266 @@ pcall(function()
     end
 end)
 
-local NotificationGui = Instance.new("ScreenGui", mainPlayersService.LocalPlayer.PlayerGui)
-NotificationGui.ResetOnSpawn = false
-NotificationGui.Name = "VapeNotifications"
+local originalDebugPrint = debugPrint
+local joinLogEnabled = true
 
-local currentNotification = nil
+local function debugPrint(message, level)
+    if not Settings.DebugMode and level ~= "PLAYER_JOIN" then return end
+    level = level or "INFO"
+    local timestamp = os.date("%H:%M:%S")
+    
+    if message:find("joined the game") or message:find("Player joined:") then
+        level = "PLAYER_JOIN"
+        print(string.format("[%s] [%s] %s", timestamp, level, message))
+        
+        if message:find("impossible join") or message:find("Impossible join") then
+            showNotification(message:gsub(".*(impossible join.*)", "%1"):gsub(".*(Impossible join.*)", "%1"), 6, "warning")
+        end
+        return
+    end
+    
+    if Settings.DebugMode then
+        print(string.format("[%s] [%s] %s", timestamp, level, message))
+    end
+end
+
+local joinTracker = {
+    playerJoinTimes = {},
+    impossibleJoins = {}
+}
+
+local function trackPlayerJoin(plr)
+    local joinTime = tick()
+    joinTracker.playerJoinTimes[plr.UserId] = joinTime
+    
+    debugPrint(string.format("PLAYER JOIN EVENT: %s (UserId: %d) joined at %s", 
+        plr.Name, plr.UserId, os.date("%H:%M:%S", joinTime)), "PLAYER_JOIN")
+    
+    task.delay(2, function()
+        if plr and plr.Parent then
+            local isSpectator = plr:GetAttribute('Spectator')
+            local hasTeam = plr:GetAttribute('Team')
+            local friends = mainPlayersService:GetFriendsAsync(plr.UserId)
+            local hasFriendInGame = false
+            
+            for _, existingPlr in pairs(mainPlayersService:GetPlayers()) do
+                if existingPlr ~= plr and existingPlr:IsFriendsWith(plr.UserId) then
+                    hasFriendInGame = true
+                    break
+                end
+            end
+            
+            local impossibleJoin = isSpectator and not hasTeam and not hasFriendInGame
+            if impossibleJoin then
+                joinTracker.impossibleJoins[plr.UserId] = true
+                debugPrint(string.format("IMPOSSIBLE JOIN DETECTED: %s (UserId: %d) - Spectator: %s, Team: %s, FriendInGame: %s", 
+                    plr.Name, plr.UserId, tostring(isSpectator), tostring(hasTeam), tostring(hasFriendInGame)), "PLAYER_JOIN")
+                
+                if Settings.StaffDetectorDebugJoins then
+                    showNotification("Staff Detector", string.format("Impossible join: %s", plr.Name), 5, "warning")
+                end
+            else
+                debugPrint(string.format("NORMAL JOIN: %s (UserId: %d) - Spectator: %s, Team: %s, FriendInGame: %s", 
+                    plr.Name, plr.UserId, tostring(isSpectator), tostring(hasTeam), tostring(hasFriendInGame)), "PLAYER_JOIN")
+                
+                if Settings.StaffDetectorDebugJoins then
+                    showNotification("Player Join", string.format("Normal join: %s", plr.Name), 3, "normal")
+                end
+            end
+        end
+    end)
+end
+
+local function enhanceStaffDetector()
+    for _, plr in pairs(mainPlayersService:GetPlayers()) do
+        trackPlayerJoin(plr)
+    end
+    
+    mainPlayersService.PlayerAdded:Connect(trackPlayerJoin)
+end
+
+pcall(function()
+    if mainPlayersService.LocalPlayer.PlayerGui:FindFirstChild("VapeNotifications") then
+        mainPlayersService.LocalPlayer.PlayerGui:FindFirstChild("VapeNotifications"):Destroy()
+    end
+end)
+
+local NotificationGui = Instance.new("ScreenGui")
+NotificationGui.Name = "VapeNotifications" 
+NotificationGui.Parent = mainPlayersService.LocalPlayer.PlayerGui
+NotificationGui.ResetOnSpawn = false
+NotificationGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local notifications = Instance.new('Folder')
+notifications.Name = 'Notifications'
+notifications.Parent = NotificationGui
+
+local fontsize = Instance.new('GetTextBoundsParams')
+fontsize.Width = math.huge
+
+local uipallet = {
+    Main = Color3.fromRGB(26, 25, 26),
+    Text = Color3.fromRGB(200, 200, 200),
+    Font = Font.fromEnum(Enum.Font.Arial),
+    FontSemiBold = Font.fromEnum(Enum.Font.Arial, Enum.FontWeight.SemiBold),
+    Tween = TweenInfo.new(0.16, Enum.EasingStyle.Linear)
+}
+
+local scale = Instance.new('UIScale')
+scale.Scale = math.max(NotificationGui.AbsoluteSize.X / 1920, 0.6)
+scale.Parent = NotificationGui
+
+NotificationGui:GetPropertyChangedSignal('AbsoluteSize'):Connect(function()
+    scale.Scale = math.max(NotificationGui.AbsoluteSize.X / 1920, 0.6)
+end)
+
+notifications.ChildRemoved:Connect(function()
+    for i, v in notifications:GetChildren() do
+        mainTweenService:Create(v, TweenInfo.new(0.4, Enum.EasingStyle.Exponential), {
+            Position = UDim2.new(1, 0, 1, -(29 + (78 * i)))
+        }):Play()
+    end
+end)
+
+local function getfontsize(text, size, font)
+    fontsize.Text = text
+    fontsize.Size = size
+    if typeof(font) == 'Font' then
+        fontsize.Font = font
+    end
+    return textService:GetTextBoundsAsync(fontsize)
+end
+
+local function removeTags(str)
+    str = str:gsub('<br%s*/>', '\n')
+    return str:gsub('<[^<>]->', '')
+end
 
 addCleanupFunction(function()
     if NotificationGui and NotificationGui.Parent then
         NotificationGui:Destroy()
     end
-    currentNotification = nil
 end)
 
-local function showNotification(message, duration)
-    if not Settings.GUIEnabled then return end  
-    duration = duration or 2.2 
-
-    if currentNotification and currentNotification.Parent then
-        currentNotification:Destroy()
-        currentNotification = nil
-    end
-
-    local notification = Instance.new("Frame")
-    notification.Size = UDim2.new(0, 300, 0, 55) 
-    notification.Position = UDim2.new(0.5, -150, 0, -80)
-    notification.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-    notification.BorderSizePixel = 0
-    notification.AnchorPoint = Vector2.new(0.5, 0)
-    notification.Parent = NotificationGui
-    currentNotification = notification
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 10)
-    corner.Parent = notification
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(100, 180, 255)
-    stroke.Thickness = 1.6
-    stroke.Parent = notification
-
-    local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1, -20, 1, -10)
-    textLabel.Position = UDim2.new(0, 10, 0, 5)
-    textLabel.BackgroundTransparency = 1
-    textLabel.TextColor3 = Color3.new(1, 1, 1)
-    textLabel.Font = Enum.Font.GothamMedium
-    textLabel.TextSize = 15
-    textLabel.Text = message
-    textLabel.TextWrapped = true
-    textLabel.TextXAlignment = Enum.TextXAlignment.Left
-    textLabel.Parent = notification
-
-    local tweenIn = mainTweenService:Create(notification, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-        {Position = UDim2.new(0.5, -150, 0, 20)})
-    tweenIn:Play()
-
-    task.spawn(function()
-        task.wait(duration)
-        if currentNotification == notification then
-            local tweenOut = mainTweenService:Create(notification, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-                {Position = UDim2.new(0.5, -150, 0, -80)})
-            tweenOut:Play()
-            tweenOut.Completed:Wait()
-            if notification and notification.Parent then
-                notification:Destroy()
-            end
-            if currentNotification == notification then
-                currentNotification = nil
-            end
-        end
+local function showNotification(title, text, duration, type)
+    if not Settings.GUIEnabled then return end
+    
+    task.delay(0, function()
+        local i = #notifications:GetChildren() + 1
+        
+        local notification = Instance.new('Frame')
+        notification.Name = 'Notification'
+        notification.Size = UDim2.fromOffset(math.max(getfontsize(removeTags(text), 14, uipallet.Font).X + 60, 250), 75)
+        notification.Position = UDim2.new(1, 0, 1, -(20 + (78 * i)))
+        notification.ZIndex = 5
+        notification.BackgroundColor3 = uipallet.Main
+        notification.BackgroundTransparency = 0.1
+        notification.BorderSizePixel = 0
+        notification.Parent = notifications
+        
+        local uicorner = Instance.new('UICorner')
+        uicorner.CornerRadius = UDim.new(0, 5)
+        uicorner.Parent = notification
+        
+        local blur = Instance.new('ImageLabel')
+        blur.Name = 'Blur'
+        blur.Size = UDim2.new(1, 89, 1, 52)
+        blur.Position = UDim2.fromOffset(-48, -31)
+        blur.BackgroundTransparency = 1
+        blur.ScaleType = Enum.ScaleType.Slice
+        blur.SliceCenter = Rect.new(52, 31, 261, 502)
+        blur.Visible = true
+        blur.Parent = notification
+        
+        local titlelabel = Instance.new('TextLabel')
+        titlelabel.Name = 'Title'
+        titlelabel.Size = UDim2.new(1, -20, 0, 20)
+        titlelabel.Position = UDim2.fromOffset(10, 16)
+        titlelabel.ZIndex = 6
+        titlelabel.BackgroundTransparency = 1
+        titlelabel.Text = title
+        titlelabel.TextXAlignment = Enum.TextXAlignment.Left
+        titlelabel.TextYAlignment = Enum.TextYAlignment.Top
+        titlelabel.TextColor3 = type == 'staff' and Color3.fromRGB(255, 120, 120) or 
+                               type == 'warning' and Color3.fromRGB(255, 180, 50) or 
+                               Color3.fromRGB(220, 220, 220)
+        titlelabel.TextSize = 14
+        titlelabel.RichText = true
+        titlelabel.FontFace = uipallet.FontSemiBold
+        titlelabel.TextStrokeTransparency = 0.5
+        titlelabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+        titlelabel.Parent = notification
+        
+        local textlabel = Instance.new('TextLabel')
+        textlabel.Name = 'Text'
+        textlabel.Size = UDim2.new(1, -20, 1, -40)
+        textlabel.Position = UDim2.fromOffset(10, 36)
+        textlabel.ZIndex = 6
+        textlabel.BackgroundTransparency = 1
+        textlabel.Text = text
+        textlabel.TextXAlignment = Enum.TextXAlignment.Left
+        textlabel.TextYAlignment = Enum.TextYAlignment.Top
+        textlabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        textlabel.TextTransparency = 0
+        textlabel.TextSize = 12
+        textlabel.RichText = true
+        textlabel.FontFace = uipallet.Font
+        textlabel.TextWrapped = true
+        textlabel.TextStrokeTransparency = 0.7
+        textlabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+        textlabel.Parent = notification
+        
+        local progress = Instance.new('Frame')
+        progress.Name = 'Progress'
+        progress.Size = UDim2.new(1, -13, 0, 2)
+        progress.Position = UDim2.new(0, 3, 1, -4)
+        progress.ZIndex = 6
+        progress.BackgroundColor3 = 
+            type == 'staff' and Color3.fromRGB(250, 50, 56)
+            or type == 'warning' and Color3.fromRGB(236, 129, 43)
+            or Color3.fromRGB(180, 180, 180)
+        progress.BorderSizePixel = 0
+        progress.Parent = notification
+        
+        local progressCorner = Instance.new('UICorner')
+        progressCorner.CornerRadius = UDim.new(0, 2)
+        progressCorner.Parent = progress
+        
+        local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad)
+        local slideInTween = mainTweenService:Create(notification, tweenInfo, {
+            AnchorPoint = Vector2.new(1, 0)
+        })
+        slideInTween:Play()
+        
+        local progressTween = mainTweenService:Create(progress, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+            Size = UDim2.fromOffset(0, 2)
+        })
+        progressTween:Play()
+        
+        task.delay(duration, function()
+            local slideOutTween = mainTweenService:Create(notification, tweenInfo, {
+                AnchorPoint = Vector2.new(0, 0)
+            })
+            slideOutTween:Play()
+            
+            task.wait(0.3)
+            notification:ClearAllChildren()
+            notification:Destroy()
+        end)
     end)
 end
+
+NotificationGui:GetPropertyChangedSignal('AbsoluteSize'):Connect(function()
+    scale.Scale = math.max(NotificationGui.AbsoluteSize.X / 1920, 0.6)
+end)
+
+notifications.ChildRemoved:Connect(function()
+    for i, v in notifications:GetChildren() do
+        mainTweenService:Create(v, TweenInfo.new(0.4, Enum.EasingStyle.Exponential), {
+            Position = UDim2.new(1, 0, 1, -(29 + (78 * i)))
+        }):Play()
+    end
+end)
 
 local staffNotifs = {}
 local staffNotificationContainer = nil
@@ -867,118 +1056,10 @@ local function initStaffNotificationContainer()
     end
 end
 
-local function createStaffNotification(message, duration, alertType, continued)
-    if not Settings.GUIEnabled then return end
-    
-    if #staffNotifs > 0 and not continued then
-        table.insert(staffNotifs, {message, duration, alertType})
-        return
-    end
-    
-    if not continued then
-        table.insert(staffNotifs, {message, duration, alertType})
-    end
-    
-    initStaffNotificationContainer()
-    
-    duration = duration or 8
+local function createStaffNotification(message, duration, alertType)
     alertType = alertType or "warning"
-    
-    local notification = Instance.new('Frame')
-    notification.Name = 'StaffNotification'
-    notification.Size = UDim2.fromOffset(280, 55)
-    notification.BackgroundTransparency = 1
-    notification.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-    notification.BorderSizePixel = 0
-    notification.Parent = staffNotificationContainer
-    
-    local corner = Instance.new('UICorner')
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = notification
-    
-    local scale = Instance.new('UIScale')
-    scale.Scale = 1.1
-    scale.Parent = notification
-    
-    local icon = Instance.new('Frame')
-    icon.Size = UDim2.fromOffset(35, 35)
-    icon.Position = UDim2.fromOffset(10, 10)
-    icon.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
-    icon.BorderSizePixel = 0
-    icon.Parent = notification
-    
-    local iconCorner = Instance.new('UICorner')
-    iconCorner.CornerRadius = UDim.new(0, 8)
-    iconCorner.Parent = icon
-    
-    local iconLabel = Instance.new('TextLabel')
-    iconLabel.Size = UDim2.fromScale(1, 1)
-    iconLabel.BackgroundTransparency = 1
-    iconLabel.Text = "⚠"
-    iconLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-    iconLabel.TextSize = 20
-    iconLabel.Font = Enum.Font.GothamBold
-    iconLabel.TextXAlignment = Enum.TextXAlignment.Center
-    iconLabel.TextYAlignment = Enum.TextYAlignment.Center
-    iconLabel.Parent = icon
-    
-    local textLabel = Instance.new('TextLabel')
-    textLabel.Size = UDim2.fromOffset(220, 45)
-    textLabel.Position = UDim2.fromOffset(55, 5)
-    textLabel.BackgroundTransparency = 1
-    textLabel.Text = message
-    textLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
-    textLabel.TextSize = 13
-    textLabel.Font = Enum.Font.Gotham
-    textLabel.TextXAlignment = Enum.TextXAlignment.Left
-    textLabel.TextYAlignment = Enum.TextYAlignment.Center
-    textLabel.TextWrapped = true
-    textLabel.Parent = notification
-    
-    local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
-    
-    local scaleIn = mainTweenService:Create(scale, tweenInfo, {Scale = 1})
-    local bgIn = mainTweenService:Create(notification, tweenInfo, {BackgroundTransparency = 0.1})
-    local iconIn = mainTweenService:Create(icon, tweenInfo, {BackgroundTransparency = 0})
-    local textIn = mainTweenService:Create(textLabel, tweenInfo, {TextTransparency = 0})
-    local iconTextIn = mainTweenService:Create(iconLabel, tweenInfo, {TextTransparency = 0})
-    
-    scaleIn:Play()
-    bgIn:Play()
-    iconIn:Play()
-    textIn:Play()
-    iconTextIn:Play()
-    
-    task.delay(duration, function()
-        if notification and notification.Parent then
-            local tweenInfoOut = TweenInfo.new(0.3, Enum.EasingStyle.Exponential, Enum.EasingDirection.In)
-            
-            local scaleOut = mainTweenService:Create(scale, tweenInfoOut, {Scale = 1.1})
-            local bgOut = mainTweenService:Create(notification, tweenInfoOut, {BackgroundTransparency = 1})
-            local iconOut = mainTweenService:Create(icon, tweenInfoOut, {BackgroundTransparency = 1})
-            local textOut = mainTweenService:Create(textLabel, tweenInfoOut, {TextTransparency = 1})
-            local iconTextOut = mainTweenService:Create(iconLabel, tweenInfoOut, {TextTransparency = 1})
-            
-            scaleOut:Play()
-            bgOut:Play()
-            iconOut:Play()
-            textOut:Play()
-            iconTextOut:Play()
-            
-            task.delay(0.4, function()
-                if notification and notification.Parent then
-                    notification:Destroy()
-                end
-            end)
-            
-            task.delay(0.2, function()
-                table.remove(staffNotifs, 1)
-                if staffNotifs[1] then
-                    createStaffNotification(staffNotifs[1][1], staffNotifs[1][2], staffNotifs[1][3], true)
-                end
-            end)
-        end
-    end)
+    local notifType = alertType == "critical" and "staff" or alertType
+    showNotification("STAFF ALERT", message, duration or 8, notifType)
 end
 
 local function waitForBedwars()
@@ -1419,19 +1500,6 @@ local function getIcon(item)
     return Icons[item] or "rbxassetid://9866757805"
 end
 
-local function addBlur(parent)
-    local blur = Instance.new('ImageLabel')
-    blur.Name = 'Blur'
-    blur.Size = UDim2.new(1, 89, 1, 52)
-    blur.Position = UDim2.fromOffset(-48, -31)
-    blur.BackgroundTransparency = 1
-    blur.Image = 'rbxassetid://8560915132'
-    blur.ScaleType = Enum.ScaleType.Slice
-    blur.SliceCenter = Rect.new(52, 31, 261, 502)
-    blur.Parent = parent
-    return blur
-end
-
 local function KitESPAdded(v, icon)
     if not Settings.KitESPEnabled then return end
     
@@ -1443,7 +1511,6 @@ local function KitESPAdded(v, icon)
     billboard.AlwaysOnTop = true
     billboard.ClipsDescendants = false
     billboard.Adornee = v
-    local blur = addBlur(billboard)
     blur.Visible = true
     local image = Instance.new('ImageLabel')
     image.Size = UDim2.fromOffset(36, 36)
@@ -2961,7 +3028,7 @@ local function checkFriendsList(plr)
     
     if not success then return friendList end
     
-    for _ = 1, 3 do -
+    for _ = 1, 3 do 
         for _, friend in pairs(pages:GetCurrentPage()) do
             table.insert(friendList, friend.Id)
         end
@@ -3008,8 +3075,10 @@ end
 local function onPlayerAdded(plr)
     StaffDetector.joinedPlayers[plr.UserId] = plr.Name
     
+    trackPlayerJoin(plr)
+    
     if Settings.StaffDetectorDebugJoins then
-        debugPrint(string.format("Player joined: %s (UserId: %d)", plr.Name, plr.UserId), "STAFFDETECTOR")
+        debugPrint(string.format("StaffDetector tracking: %s (UserId: %d)", plr.Name, plr.UserId), "STAFFDETECTOR")
     end
     
     if plr == lplr then return end
@@ -3178,7 +3247,7 @@ local function disableAllFeatures()
     disableStaffDetector()
     allFeaturesEnabled = false
     task.spawn(function()
-        showNotification("Script disabled. Press RightShift to re-enable.", 3)
+        showNotification("Script Status", "Script disabled. Press RightShift to re-enable.", 3, "normal")
     end)
 end
 
@@ -3194,7 +3263,7 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
             debugPrint("Enabling all features", "INPUT")
             enableAllFeatures()
             task.spawn(function()
-                showNotification("Script enabled. Press RightShift to disable.", 3)
+                showNotification("Script Status", "Script enabled. Press RightShift to disable.", 3, "normal")
             end)
         end
 
@@ -3203,7 +3272,7 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
             debugPrint("HitBoxes enable key pressed - Enabling hitboxes", "INPUT")
             enableHitboxes()
             task.spawn(function()
-                showNotification("HitBoxes enabled", 2)
+                showNotification("HitBoxes", "HitBoxes enabled", 2, "normal")
             end)
         end
 
@@ -3212,7 +3281,7 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
             debugPrint("HitBoxes disable key pressed - Disabling hitboxes", "INPUT")
             disableHitboxes()
             task.spawn(function()
-                showNotification("HitBoxes disabled", 2)
+                showNotification("HitBoxes", "HitBoxes disabled", 2, "normal")
             end)
         end
 
@@ -3221,13 +3290,13 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
             debugPrint("ProjectileAimbot key pressed - Disabling projectile aimbot", "INPUT")
             disableProjectileAimbot()
             task.spawn(function()
-                showNotification("Projectile Aimbot disabled", 2)
+                showNotification("Projectile Aimbot", "Projectile Aimbot disabled", 2, "normal")
             end)
         else
             debugPrint("ProjectileAimbot key pressed - Enabling projectile aimbot", "INPUT")
             enableProjectileAimbot()
             task.spawn(function()
-                showNotification("Projectile Aimbot enabled", 2)
+                showNotification("Projectile Aimbot", "Projectile Aimbot enabled", 2, "normal")
             end)
         end
 
@@ -3279,14 +3348,13 @@ task.spawn(function()
     if bedwarsLoaded then
         statusMsg = statusMsg .. " HitFix: " .. (Settings.HitFixEnabled and "ON" or "OFF") .. ", HitBoxes: " .. Settings.HitBoxesMode
     end
-    showNotification(statusMsg, 4)
+    showNotification("Script Loaded", statusMsg, 4, "normal")
     debugPrint("Script fully initialized and ready", "INIT")
 end)
 
 addCleanupFunction(function()
-    if staffNotificationContainer and staffNotificationContainer.Parent then
-        staffNotificationContainer:Destroy()
-        staffNotificationContainer = nil
+    if NotificationGui and NotificationGui.Parent then
+        NotificationGui:Destroy()
     end
     table.clear(staffNotifs)
     disableAllFeatures()
