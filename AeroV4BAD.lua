@@ -758,6 +758,11 @@ local Settings = {
     AimAssistMaxAngle = 170,
     AimAssistClickAim = false,
     AimAssistStrafeIncrease = true,
+    StaffDetectorEnabled = true,
+    StaffDetectorLeaveParty = true,
+    StaffDetectorBlacklistClans = true,
+    StaffDetectorMode = "Notify",
+    StaffDetectorDebugJoins = true,
     GUIEnabled = true,
     UninjectKeybind = "RightAlt",
     DebugMode = false, -- for aero to debug shi
@@ -842,6 +847,139 @@ local function showNotification(message, duration)
     end)
 end
 
+local staffNotifs = {}
+local staffNotificationContainer = nil
+
+local function initStaffNotificationContainer()
+    if not staffNotificationContainer then
+        staffNotificationContainer = Instance.new("Frame")
+        staffNotificationContainer.Name = "StaffNotificationContainer"
+        staffNotificationContainer.Size = UDim2.new(0, 300, 1, 0)
+        staffNotificationContainer.Position = UDim2.new(1, -320, 0, 20)
+        staffNotificationContainer.BackgroundTransparency = 1
+        staffNotificationContainer.Parent = NotificationGui
+        
+        local layout = Instance.new("UIListLayout")
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.VerticalAlignment = Enum.VerticalAlignment.Top
+        layout.Padding = UDim.new(0, 8)
+        layout.Parent = staffNotificationContainer
+    end
+end
+
+local function createStaffNotification(message, duration, alertType, continued)
+    if not Settings.GUIEnabled then return end
+    
+    if #staffNotifs > 0 and not continued then
+        table.insert(staffNotifs, {message, duration, alertType})
+        return
+    end
+    
+    if not continued then
+        table.insert(staffNotifs, {message, duration, alertType})
+    end
+    
+    initStaffNotificationContainer()
+    
+    duration = duration or 8
+    alertType = alertType or "warning"
+    
+    local notification = Instance.new('Frame')
+    notification.Name = 'StaffNotification'
+    notification.Size = UDim2.fromOffset(280, 55)
+    notification.BackgroundTransparency = 1
+    notification.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    notification.BorderSizePixel = 0
+    notification.Parent = staffNotificationContainer
+    
+    local corner = Instance.new('UICorner')
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = notification
+    
+    local scale = Instance.new('UIScale')
+    scale.Scale = 1.1
+    scale.Parent = notification
+    
+    local icon = Instance.new('Frame')
+    icon.Size = UDim2.fromOffset(35, 35)
+    icon.Position = UDim2.fromOffset(10, 10)
+    icon.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+    icon.BorderSizePixel = 0
+    icon.Parent = notification
+    
+    local iconCorner = Instance.new('UICorner')
+    iconCorner.CornerRadius = UDim.new(0, 8)
+    iconCorner.Parent = icon
+    
+    local iconLabel = Instance.new('TextLabel')
+    iconLabel.Size = UDim2.fromScale(1, 1)
+    iconLabel.BackgroundTransparency = 1
+    iconLabel.Text = "⚠"
+    iconLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+    iconLabel.TextSize = 20
+    iconLabel.Font = Enum.Font.GothamBold
+    iconLabel.TextXAlignment = Enum.TextXAlignment.Center
+    iconLabel.TextYAlignment = Enum.TextYAlignment.Center
+    iconLabel.Parent = icon
+    
+    local textLabel = Instance.new('TextLabel')
+    textLabel.Size = UDim2.fromOffset(220, 45)
+    textLabel.Position = UDim2.fromOffset(55, 5)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = message
+    textLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+    textLabel.TextSize = 13
+    textLabel.Font = Enum.Font.Gotham
+    textLabel.TextXAlignment = Enum.TextXAlignment.Left
+    textLabel.TextYAlignment = Enum.TextYAlignment.Center
+    textLabel.TextWrapped = true
+    textLabel.Parent = notification
+    
+    local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+    
+    local scaleIn = mainTweenService:Create(scale, tweenInfo, {Scale = 1})
+    local bgIn = mainTweenService:Create(notification, tweenInfo, {BackgroundTransparency = 0.1})
+    local iconIn = mainTweenService:Create(icon, tweenInfo, {BackgroundTransparency = 0})
+    local textIn = mainTweenService:Create(textLabel, tweenInfo, {TextTransparency = 0})
+    local iconTextIn = mainTweenService:Create(iconLabel, tweenInfo, {TextTransparency = 0})
+    
+    scaleIn:Play()
+    bgIn:Play()
+    iconIn:Play()
+    textIn:Play()
+    iconTextIn:Play()
+    
+    task.delay(duration, function()
+        if notification and notification.Parent then
+            local tweenInfoOut = TweenInfo.new(0.3, Enum.EasingStyle.Exponential, Enum.EasingDirection.In)
+            
+            local scaleOut = mainTweenService:Create(scale, tweenInfoOut, {Scale = 1.1})
+            local bgOut = mainTweenService:Create(notification, tweenInfoOut, {BackgroundTransparency = 1})
+            local iconOut = mainTweenService:Create(icon, tweenInfoOut, {BackgroundTransparency = 1})
+            local textOut = mainTweenService:Create(textLabel, tweenInfoOut, {TextTransparency = 1})
+            local iconTextOut = mainTweenService:Create(iconLabel, tweenInfoOut, {TextTransparency = 1})
+            
+            scaleOut:Play()
+            bgOut:Play()
+            iconOut:Play()
+            textOut:Play()
+            iconTextOut:Play()
+            
+            task.delay(0.4, function()
+                if notification and notification.Parent then
+                    notification:Destroy()
+                end
+            end)
+            
+            task.delay(0.2, function()
+                table.remove(staffNotifs, 1)
+                if staffNotifs[1] then
+                    createStaffNotification(staffNotifs[1][1], staffNotifs[1][2], staffNotifs[1][3], true)
+                end
+            end)
+        end
+    end)
+end
 
 local function waitForBedwars()
     local attempts = 0
@@ -2769,6 +2907,198 @@ end
 local UserInputService = game:GetService("UserInputService")
 local allFeaturesEnabled = true
 
+local StaffDetector = {
+    Enabled = false,
+    blacklistedClans = {'gg', 'gg2', 'DV', 'DV2'},
+    blacklistedUserIds = {1502104539, 3826146717, 4531785383, 1049767300, 4926350670, 653085195, 184655415, 2752307430, 5087196317, 5744061325, 1536265275},
+    joinedPlayers = {},
+    connections = {}
+}
+
+local function getPlayerRank(plr, groupId)
+    local success, result = pcall(function()
+        return plr:GetRankInGroup(groupId)
+    end)
+    if not success then
+        debugPrint("StaffDetector: Failed to get rank for " .. plr.Name .. " - " .. tostring(result), "STAFFDETECTOR")
+    end
+    return success and result or 0
+end
+
+local function staffDetected(plr, checkType)
+    debugPrint(string.format("StaffDetector: %s detected (%s) - UserId: %d", plr.Name, checkType, plr.UserId), "STAFFDETECTOR")
+    
+    local alertLevel = "critical"
+    if checkType:find("clan") then
+        alertLevel = "alert"
+    elseif checkType:find("impossible") then
+        alertLevel = "warning"
+    end
+    
+    createStaffNotification(
+        "STAFF DETECTED (" .. checkType .. "): " .. plr.Name .. " (" .. plr.UserId .. ")",
+        10,
+        alertLevel
+    )
+    
+    if Settings.StaffDetectorLeaveParty and bedwars and bedwars.PartyController then
+        pcall(function()
+            bedwars.PartyController:leaveParty()
+            debugPrint("StaffDetector: Left party due to staff detection", "STAFFDETECTOR")
+        end)
+    end
+    
+    if Settings.StaffDetectorMode == "Notify" then
+        return
+    end
+end
+
+local function checkFriendsList(plr)
+    local friendList = {}
+    local success, pages = pcall(function()
+        return mainPlayersService:GetFriendsAsync(plr.UserId)
+    end)
+    
+    if not success then return friendList end
+    
+    for _ = 1, 3 do -
+        for _, friend in pairs(pages:GetCurrentPage()) do
+            table.insert(friendList, friend.Id)
+        end
+        if pages.IsFinished then break end
+        pcall(function() pages:AdvanceToNextPageAsync() end)
+    end
+    
+    return friendList
+end
+
+local function checkImpossibleJoin(plr, connection)
+    if not plr:GetAttribute('Team') and plr:GetAttribute('Spectator') then
+        if connection then
+            connection:Disconnect()
+        end
+        
+        local friendList = checkFriendsList(plr)
+        local joinedFromFriend = nil
+        
+        for _, friendId in ipairs(friendList) do
+            if StaffDetector.joinedPlayers[friendId] then
+                joinedFromFriend = StaffDetector.joinedPlayers[friendId]
+                break
+            end
+        end
+        
+        if not joinedFromFriend then
+            staffDetected(plr, 'impossible_join')
+            return true
+        else
+            debugPrint(string.format("StaffDetector: Spectator %s joined from %s", plr.Name, joinedFromFriend), "STAFFDETECTOR")
+            if Settings.StaffDetectorDebugJoins then
+                createStaffNotification(
+                    string.format("Spectator %s joined from %s", plr.Name, joinedFromFriend),
+                    5,
+                    "warning"
+                )
+            end
+        end
+    end
+    return false
+end
+
+local function onPlayerAdded(plr)
+    StaffDetector.joinedPlayers[plr.UserId] = plr.Name
+    
+    if Settings.StaffDetectorDebugJoins then
+        debugPrint(string.format("Player joined: %s (UserId: %d)", plr.Name, plr.UserId), "STAFFDETECTOR")
+    end
+    
+    if plr == lplr then return end
+    
+    if table.find(StaffDetector.blacklistedUserIds, plr.UserId) then
+        staffDetected(plr, 'blacklisted_user')
+        return
+    end
+    
+    local staffRank = getPlayerRank(plr, 5774246)
+    if staffRank >= 100 then
+        staffDetected(plr, 'staff_role')
+        return
+    end
+    
+    local connection
+    connection = plr:GetAttributeChangedSignal('Spectator'):Connect(function()
+        if checkImpossibleJoin(plr, connection) then
+            return
+        end
+    end)
+    
+    table.insert(StaffDetector.connections, connection)
+    
+    if checkImpossibleJoin(plr, connection) then
+        return
+    end
+    
+    if not plr:GetAttribute('ClanTag') then
+        local clanConnection
+        clanConnection = plr:GetAttributeChangedSignal('ClanTag'):Connect(function()
+            if clanConnection then
+                clanConnection:Disconnect()
+            end
+            if Settings.StaffDetectorBlacklistClans and table.find(StaffDetector.blacklistedClans, plr:GetAttribute('ClanTag')) then
+                staffDetected(plr, 'blacklisted_clan_' .. (plr:GetAttribute('ClanTag') or 'unknown'):lower())
+            end
+        end)
+        table.insert(StaffDetector.connections, clanConnection)
+    else
+        if Settings.StaffDetectorBlacklistClans and table.find(StaffDetector.blacklistedClans, plr:GetAttribute('ClanTag')) then
+            staffDetected(plr, 'blacklisted_clan_' .. (plr:GetAttribute('ClanTag') or 'unknown'):lower())
+        end
+    end
+end
+
+local function onPlayerRemoving(plr)
+    StaffDetector.joinedPlayers[plr.UserId] = nil
+end
+
+local function enableStaffDetector()
+    if StaffDetector.Enabled then return end
+    
+    debugPrint("StaffDetector: Enabling...", "STAFFDETECTOR")
+    
+    table.clear(StaffDetector.joinedPlayers)
+    for _, conn in pairs(StaffDetector.connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    table.clear(StaffDetector.connections)
+    
+    table.insert(StaffDetector.connections, mainPlayersService.PlayerAdded:Connect(onPlayerAdded))
+    table.insert(StaffDetector.connections, mainPlayersService.PlayerRemoving:Connect(onPlayerRemoving))
+    
+    for _, plr in pairs(mainPlayersService:GetPlayers()) do
+        task.spawn(onPlayerAdded, plr)
+    end
+    
+    StaffDetector.Enabled = true
+    debugPrint("StaffDetector: Enabled successfully", "STAFFDETECTOR")
+    createStaffNotification("Staff Detector Enabled", 3, "warning")
+end
+
+local function disableStaffDetector()
+    if not StaffDetector.Enabled then return end
+    
+    debugPrint("StaffDetector: Disabling...", "STAFFDETECTOR")
+    
+    for _, conn in pairs(StaffDetector.connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    table.clear(StaffDetector.connections)
+    table.clear(StaffDetector.joinedPlayers)
+    
+    StaffDetector.Enabled = false
+    debugPrint("StaffDetector: Disabled", "STAFFDETECTOR")
+end
+
+
 local function enableAllFeatures()
     debugPrint("enableAllFeatures() called", "DEBUG")
     debugPrint("Projectile Aimbot Settings:", "DEBUG")
@@ -2824,6 +3154,9 @@ local function enableAllFeatures()
     if Settings.AimAssistEnabled then
         enableAimAssist()
     end
+    if Settings.StaffDetectorEnabled then
+        enableStaffDetector()
+    end
     allFeaturesEnabled = true
 end
 
@@ -2842,6 +3175,7 @@ local function disableAllFeatures()
     disableNoFall()
     disableNoSlowdown()
     disableAimAssist()
+    disableStaffDetector()
     allFeaturesEnabled = false
     task.spawn(function()
         showNotification("Script disabled. Press RightShift to re-enable.", 3)
@@ -2950,7 +3284,13 @@ task.spawn(function()
 end)
 
 addCleanupFunction(function()
+    if staffNotificationContainer and staffNotificationContainer.Parent then
+        staffNotificationContainer:Destroy()
+        staffNotificationContainer = nil
+    end
+    table.clear(staffNotifs)
     disableAllFeatures()
+    disableStaffDetector()
     table.clear(strafingPatterns)
     table.clear(movementHistory)
     pcall(function()
