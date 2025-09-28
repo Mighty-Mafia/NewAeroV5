@@ -721,58 +721,61 @@ repeat task.wait() until game:IsLoaded()
 
 -- Settings (you can change these values)
 local Settings = {
-    ToggleKeybind = "RightShift",
-    HitBoxesMode = "Player", -- "Sword" or "Player"
+    AimAssistAimSpeed = 1,
+    AimAssistClickAim = false,
+    AimAssistDistance = 30,
+    AimAssistEnabled = true,
+    AimAssistFirstPersonCheck = true,
+    AimAssistMaxAngle = 170,
+    AimAssistShopCheck = true,
+    AimAssistStrafeIncrease = false,
+    AimAssistTargetMode = "Distance",
+    AimAssistTargetNPCs = false,
+    AimAssistTargetPlayers = true,
+    AimAssistTargetWalls = false,
+    AutoChargeBowEnabled = false,
+    AutoClickerBlockCPS = 22,
+    AutoClickerCPS = 17,
     AutoClickerEnabled = true,
-    AutoClickerCPS = 12,
-    AutoClickerMaxCPS = 12,
+    AutoClickerMaxBlockCPS = 22,
+    AutoClickerMaxCPS = 17,
     AutoClickerPlaceBlocks = true,
-    AutoClickerBlockCPS = 20,
-    AutoClickerMaxBlockCPS = 20, 
-    HitBoxesExpandAmount = 70, 
-    HitBoxesEnabled = true, 
-    HitBoxesEnableKeybind = "Z",  
-    HitBoxesDisableKeybind = "X", 
+    AutoToolEnabled = true,
+    DebugMode = false, -- for aero to debug shi
+    GUIEnabled = true,
+    FastBreakEnabled = true,
+    FastBreakSpeed = 0.22,
+    HitBoxesDisableKeybind = "X",
+    HitBoxesEnableKeybind = "Z",
+    HitBoxesEnabled = true,
+    HitBoxesExpandAmount = 75,
+    HitBoxesMode = "Player", -- "Sword" or "Player"
     HitFixEnabled = true,
     InstantPPEnabled = true,
-    AutoChargeBowEnabled = false,
-    AutoToolEnabled = true,
-    VelocityEnabled = true,
-    VelocityHorizontal = 63,
-    VelocityVertical = 63,
-    VelocityChance = 100,
-    VelocityTargetCheck = false,
-    FastBreakEnabled = true,
-    FastBreakSpeed = 0.21,
+    KitESPEnabled = true,
     NoFallEnabled = true,
     NoFallMode = "Packet", -- "Packet", "Gravity", "Teleport", "Bounce"
     NoSlowdownEnabled = true,
-    KitESPEnabled = true,
     ProjectileAimbotEnabled = true,
-    ProjectileAimbotKeybind = "Backquote", 
     ProjectileAimbotFOV = 250,
-    ProjectileAimbotTargetPart = "RootPart", 
+    ProjectileAimbotKeybind = "Backquote",
+    ProjectileAimbotNPCs = false,
     ProjectileAimbotOtherProjectiles = false,
     ProjectileAimbotPlayers = true,
+    ProjectileAimbotTargetPart = "RootPart",
     ProjectileAimbotWalls = false,
-    ProjectileAimbotNPCs = false,
-    AimAssistEnabled = true,
-    AimAssistTargetPlayers = true,
-    AimAssistTargetWalls = false,
-    AimAssistTargetMode = "Distance",
-    AimAssistAimSpeed = 1,
-    AimAssistDistance = 30,
-    AimAssistMaxAngle = 170,
-    AimAssistClickAim = false,
-    AimAssistStrafeIncrease = false,
+    StaffDetectorBlacklistClans = true,
+    StaffDetectorDebugJoins = false,
     StaffDetectorEnabled = true,
     StaffDetectorLeaveParty = false,
-    StaffDetectorBlacklistClans = true,
     StaffDetectorMode = "Notify",
-    StaffDetectorDebugJoins = false,
-    GUIEnabled = true,
+    ToggleKeybind = "RightShift",
     UninjectKeybind = "RightAlt",
-    DebugMode = false, -- for aero to debug shi
+    VelocityChance = 100,
+    VelocityEnabled = true,
+    VelocityHorizontal = 63,
+    VelocityTargetCheck = false,
+    VelocityVertical = 63,
 }
 
 pcall(function()
@@ -2315,6 +2318,20 @@ local autoClickerThread = nil
 local autoClickerConnections = {}
 local rand = Random.new()
 
+local AutoClicker = {
+    Enabled = Settings.AutoClickerEnabled
+}
+local CPS = {
+    GetRandomValue = function()
+        return rand:NextNumber(Settings.AutoClickerCPS, Settings.AutoClickerMaxCPS)
+    end
+}
+local BlockCPS = {
+    GetRandomValue = function()
+        return rand:NextNumber(Settings.AutoClickerBlockCPS, Settings.AutoClickerMaxBlockCPS)
+    end
+}
+
 local sortmethods = {
     Damage = function(a, b)
         return a.Health < b.Health
@@ -2332,6 +2349,11 @@ local sortmethods = {
     end
 }
 
+local function isFirstPerson()
+    if not (lplr.Character and lplr.Character:FindFirstChild("Head")) then return nil end
+    return (lplr.Character.Head.Position - gameCamera.CFrame.Position).Magnitude < 2
+end
+
 local function enableAimAssist()
     if AimAssistEnabled or not bedwarsLoaded then return false end
     
@@ -2343,24 +2365,37 @@ local function enableAimAssist()
         aimAssistConnection = mainRunService.Heartbeat:Connect(function(dt)
             if not entitylib.isAlive then return end
             
-            local hasSword = false
-            if store and store.hand and store.hand.toolType == 'sword' then
-                hasSword = true
-            else
-                for slot, item in store.inventory.hotbar do
-                    if item and item.item and bedwars.ItemMeta[item.item.itemType] and 
-                       bedwars.ItemMeta[item.item.itemType].sword then
-                        hasSword = true
-                        break
-                    end
+            if store and store.hand and store.hand.toolType == 'block' then
+                debugPrint("AimAssist: Holding blocks, aim assist disabled", "AIMASSIST")
+                return
+            end
+            
+            if not (store and store.hand and store.hand.toolType == 'sword') then
+                debugPrint("AimAssist: Not holding sword", "AIMASSIST")
+                return
+            end
+            
+            if Settings.AimAssistFirstPersonCheck then
+                if not isFirstPerson() then 
+                    debugPrint("AimAssist: Not in first person", "AIMASSIST")
+                    return 
                 end
             end
             
-            if not hasSword then return end
+            if Settings.AimAssistShopCheck then
+                local isShop = lplr:FindFirstChild("PlayerGui") and lplr:FindFirstChild("PlayerGui"):FindFirstChild("ItemShop") or nil
+                if isShop then 
+                    debugPrint("AimAssist: In shop, aim assist disabled", "AIMASSIST")
+                    return 
+                end
+            end
             
             if Settings.AimAssistClickAim then
                 local timeSinceLastSwing = tick() - (bedwars.SwordController.lastSwing or 0)
-                if timeSinceLastSwing > 0.4 then return end
+                if timeSinceLastSwing > 0.4 then 
+                    debugPrint("AimAssist: Click aim condition not met", "AIMASSIST")
+                    return 
+                end
             end
             
             local target = nil
@@ -2369,6 +2404,7 @@ local function enableAimAssist()
             for _, entity in pairs(entitylib.List) do
                 if not entity.Targetable then continue end
                 if not Settings.AimAssistTargetPlayers and entity.Player then continue end
+                if not Settings.AimAssistTargetNPCs and entity.NPC then continue end
                 if not entitylib.isVulnerable(entity) then continue end
                 
                 local distance = (entity.RootPart.Position - entitylib.character.RootPart.Position).Magnitude
@@ -2406,21 +2442,30 @@ local function enableAimAssist()
             end
             
             if target then
+                debugPrint(string.format("AimAssist: Target acquired - %s", target.Player and target.Player.Name or "NPC"), "AIMASSIST")
+                
                 local delta = (target.RootPart.Position - entitylib.character.RootPart.Position)
                 local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
                 local angle = math.acos(localfacing:Dot((delta * Vector3.new(1, 0, 1)).Unit))
                 
-                if angle >= (math.rad(Settings.AimAssistMaxAngle) / 2) then return end
+                if angle >= (math.rad(Settings.AimAssistMaxAngle) / 2) then 
+                    debugPrint("AimAssist: Angle too large", "AIMASSIST")
+                    return 
+                end
                 
                 local aimSpeed = Settings.AimAssistAimSpeed
                 if Settings.AimAssistStrafeIncrease and (mainInputService:IsKeyDown(Enum.KeyCode.A) or mainInputService:IsKeyDown(Enum.KeyCode.D)) then
                     aimSpeed = aimSpeed + 10
+                    debugPrint("AimAssist: Strafe increase applied", "AIMASSIST")
                 end
                 
                 gameCamera.CFrame = gameCamera.CFrame:Lerp(
                     CFrame.lookAt(gameCamera.CFrame.p, target.RootPart.Position), 
                     aimSpeed * dt
                 )
+                debugPrint("AimAssist: Aiming at target", "AIMASSIST")
+            else
+                debugPrint("AimAssist: No valid target found", "AIMASSIST")
             end
             
             table.clear(targetsList)
@@ -2452,106 +2497,65 @@ local function disableAimAssist()
     return true
 end
 
-local function getRandomCPS(min, max)
-    return rand:NextNumber(min, max)
-end
-
 local function enableAutoClicker()
     if AutoClickerEnabled or not bedwarsLoaded then return false end
     
-    debugPrint("enableAutoClicker() called", "DEBUG")
+    local Thread = nil
     
-    local success = pcall(function()
-        local function autoClick()
-            debugPrint("AutoClicker: Mouse button pressed, starting auto-click", "DEBUG")
-            
-            if autoClickerThread then
-                task.cancel(autoClickerThread)
-            end
-            
-            autoClickerThread = task.spawn(function()
-                while AutoClickerEnabled do
-                    local canClick = true
-                    pcall(function()
-                        if bedwars.AppController and bedwars.UILayers and bedwars.UILayers.MAIN then
-                            canClick = not bedwars.AppController:isLayerOpen(bedwars.UILayers.MAIN)
-                        end
-                    end)
-                    
-                    if canClick then
-                        local handType = store.hand and store.hand.toolType or "none"
-                        debugPrint("AutoClicker: Hand type is " .. handType, "DEBUG")
-                        
-                        local blockPlacer = bedwars.BlockPlacementController and bedwars.BlockPlacementController.blockPlacer
-                        
-                        if Settings.AutoClickerPlaceBlocks and handType == 'block' and blockPlacer then
-                            debugPrint("AutoClicker: Attempting block placement", "DEBUG")
-                            if (workspace:GetServerTimeNow() - (bedwars.BlockCpsController and bedwars.BlockCpsController.lastPlaceTimestamp or 0)) >= ((1 / 12) * 0.5) then
-                                local mouseinfo = blockPlacer.clientManager:getBlockSelector():getMouseInfo(0)
-                                if mouseinfo and mouseinfo.placementPosition == mouseinfo.placementPosition then
-                                    task.spawn(blockPlacer.placeBlock, blockPlacer, mouseinfo.placementPosition)
-                                end
+    local function AutoClick()
+        if Thread then
+            task.cancel(Thread)
+        end
+
+        Thread = task.delay(1 / 7, function()
+            repeat
+                if not bedwars.AppController:isLayerOpen(bedwars.UILayers.MAIN) then
+                    local blockPlacer = bedwars.BlockPlacementController.blockPlacer
+                    if store.hand.toolType == 'block' and blockPlacer then
+                        if (workspace:GetServerTimeNow() - bedwars.BlockCpsController.lastPlaceTimestamp) >= ((1 / 12) * 0.5) then
+                            local mouseinfo = blockPlacer.clientManager:getBlockSelector():getMouseInfo(0)
+                            if mouseinfo and mouseinfo.placementPosition == mouseinfo.placementPosition then
+                                task.spawn(blockPlacer.placeBlock, blockPlacer, mouseinfo.placementPosition)
                             end
-                            task.wait(1 / getRandomCPS(Settings.AutoClickerBlockCPS, Settings.AutoClickerMaxBlockCPS))
-                        elseif handType == 'sword' then
-                            debugPrint("AutoClicker: Swinging sword", "DEBUG")
-                            if bedwars.SwordController and bedwars.SwordController.swingSwordAtMouse then
-                                bedwars.SwordController:swingSwordAtMouse(0.39)
-                            end
-                            task.wait(1 / getRandomCPS(Settings.AutoClickerCPS, Settings.AutoClickerMaxCPS))
-                        else
-                            debugPrint("AutoClicker: No valid tool, waiting", "DEBUG")
-                            task.wait(0.1)
                         end
-                    else
-                        task.wait(0.1)
+                    elseif store.hand.toolType == 'sword' then
+                        bedwars.SwordController:swingSwordAtMouse()
                     end
                 end
-                debugPrint("AutoClicker: Auto-click loop ended", "DEBUG")
-            end)
-        end
-        
-        local function startAutoClicker(input)
+
+                task.wait(1 / (store.hand.toolType == 'block' and BlockCPS or CPS).GetRandomValue())
+            until not AutoClickerEnabled
+        end)
+    end
+    
+    local success = pcall(function()
+        table.insert(autoClickerConnections, mainInputService.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                debugPrint("AutoClicker: Left mouse button pressed", "DEBUG")
-                autoClick()
+                AutoClick()
             end
-        end
-        
-        local function stopAutoClicker(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 and autoClickerThread then
-                debugPrint("AutoClicker: Left mouse button released, stopping", "DEBUG")
-                task.cancel(autoClickerThread)
-                autoClickerThread = nil
+        end))
+
+        table.insert(autoClickerConnections, mainInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 and Thread then
+                task.cancel(Thread)
+                Thread = nil
             end
-        end
-        
-        table.insert(autoClickerConnections, mainInputService.InputBegan:Connect(startAutoClicker))
-        table.insert(autoClickerConnections, mainInputService.InputEnded:Connect(stopAutoClicker))
-        
+        end))
+
         if mainInputService.TouchEnabled then
             pcall(function()
-                local mobileButton = lplr.PlayerGui:FindFirstChild("MobileUI")
-                if mobileButton and mobileButton:FindFirstChild("2") then
-                    table.insert(autoClickerConnections, mobileButton["2"].MouseButton1Down:Connect(autoClick))
-                    table.insert(autoClickerConnections, mobileButton["2"].MouseButton1Up:Connect(function()
-                        if autoClickerThread then
-                            task.cancel(autoClickerThread)
-                            autoClickerThread = nil
-                        end
-                    end))
-                    debugPrint("AutoClicker: Mobile support connected", "DEBUG")
-                end
+                table.insert(autoClickerConnections, lplr.PlayerGui.MobileUI['2'].MouseButton1Down:Connect(AutoClick))
+                table.insert(autoClickerConnections, lplr.PlayerGui.MobileUI['2'].MouseButton1Up:Connect(function()
+                    if Thread then
+                        task.cancel(Thread)
+                        Thread = nil
+                    end
+                end))
             end)
         end
         
         AutoClickerEnabled = true
-        debugPrint("AutoClicker enabled successfully", "SUCCESS")
     end)
-    
-    if not success then
-        debugPrint("enableAutoClicker() failed", "ERROR")
-    end
     
     return success
 end
@@ -3336,15 +3340,6 @@ end
 
 
 local function enableAllFeatures()
-    debugPrint("enableAllFeatures() called", "DEBUG")
-    debugPrint("Projectile Aimbot Settings:", "DEBUG")
-    debugPrint("  FOV: " .. Settings.ProjectileAimbotFOV, "DEBUG")
-    debugPrint("  TargetPart: " .. Settings.ProjectileAimbotTargetPart, "DEBUG")
-    debugPrint("  OtherProjectiles: " .. tostring(Settings.ProjectileAimbotOtherProjectiles), "DEBUG")
-    debugPrint("  Players: " .. tostring(Settings.ProjectileAimbotPlayers), "DEBUG")
-    debugPrint("  Walls: " .. tostring(Settings.ProjectileAimbotWalls), "DEBUG")
-    debugPrint("  NPCs: " .. tostring(Settings.ProjectileAimbotNPCs), "DEBUG")
-    
     ProjectileAimbotSettings.FOV = Settings.ProjectileAimbotFOV
     ProjectileAimbotSettings.TargetPart = Settings.ProjectileAimbotTargetPart
     ProjectileAimbotSettings.OtherProjectiles = Settings.ProjectileAimbotOtherProjectiles
