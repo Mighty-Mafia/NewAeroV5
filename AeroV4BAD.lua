@@ -723,6 +723,12 @@ repeat task.wait() until game:IsLoaded()
 local Settings = {
     ToggleKeybind = "RightShift",
     HitBoxesMode = "Player", -- "Sword" or "Player"
+    AutoClickerEnabled = true,
+    AutoClickerCPS = 12,
+    AutoClickerMaxCPS = 12,
+    AutoClickerPlaceBlocks = true,
+    AutoClickerBlockCPS = 20,
+    AutoClickerMaxBlockCPS = 20, 
     HitBoxesExpandAmount = 70, 
     HitBoxesEnabled = true, 
     HitBoxesEnableKeybind = "Z",  
@@ -1285,6 +1291,53 @@ end
 
 
 
+local function updateStore(new, old)
+    if new.Bedwars ~= old.Bedwars then
+        store.equippedKit = new.Bedwars.kit ~= 'none' and new.Bedwars.kit or ''
+    end
+
+    if new.Game ~= old.Game then
+        store.matchState = new.Game.matchState
+        store.queueType = new.Game.queueType or 'bedwars_test'
+    end
+
+    if new.Inventory ~= old.Inventory then
+        local newinv = (new.Inventory and new.Inventory.observedInventory or {inventory = {}})
+        local oldinv = (old.Inventory and old.Inventory.observedInventory or {inventory = {}})
+        store.inventory = newinv
+
+        if newinv ~= oldinv then
+            vapeEvents.InventoryChanged:Fire()
+        end
+
+        if newinv.inventory.items ~= oldinv.inventory.items then
+            vapeEvents.InventoryAmountChanged:Fire()
+            store.tools.sword = getSword()
+            for _, v in {'stone', 'wood', 'wool'} do
+                store.tools[v] = getTool(v)
+            end
+        end
+
+        if newinv.inventory.hand ~= oldinv.inventory.hand then
+            local currentHand, toolType = newinv.inventory.hand, ''
+            if currentHand then
+                local handData = bedwars.ItemMeta[currentHand.itemType]
+                if handData then
+                    toolType = handData.sword and 'sword' or handData.block and 'block' or currentHand.itemType:find('bow') and 'bow' or ''
+                end
+            end
+
+            store.hand = {
+                tool = currentHand and currentHand.tool,
+                amount = currentHand and currentHand.amount or 0,
+                toolType = toolType
+            }
+            
+            debugPrint("Store hand updated - toolType: " .. toolType .. ", itemType: " .. (currentHand and currentHand.itemType or "none"), "DEBUG")
+        end
+    end
+end
+
 local function setupBedwars()
     if not knit then return false end
 
@@ -1329,6 +1382,14 @@ local function setupBedwars()
         bedwars.KnockbackUtil = require(mainReplicatedStorage.TS.damage['knockback-util']).KnockbackUtil
 
         debugPrint("bedwars.KnockbackUtil loaded successfully", "SUCCESS")
+
+        pcall(function()
+            bedwars.AppController = knit.Controllers.AppController or require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out.client.controllers['app-controller']).AppController
+            bedwars.UILayers = require(mainReplicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out).UILayers
+            bedwars.BlockPlacementController = knit.Controllers.BlockPlacementController
+            bedwars.BlockCpsController = knit.Controllers.BlockCpsController
+            debugPrint("Additional bedwars components loaded for AutoClicker", "SUCCESS")
+        end)
 
         local combatConstantSuccess = false
         local combatConstantPaths = {
@@ -1422,30 +1483,6 @@ local function setupBedwars()
         end
 
         pcall(function()
-            local function updateStore(new, old)
-                if new.Bedwars ~= old.Bedwars then
-                    store.equippedKit = new.Bedwars.kit ~= 'none' and new.Bedwars.kit or ''
-                end
-                
-                if new.Inventory ~= old.Inventory then
-                    local newinv = (new.Inventory and new.Inventory.observedInventory or {inventory = {}})
-                    local oldinv = (old.Inventory and old.Inventory.observedInventory or {inventory = {}})
-                    store.inventory = newinv
-
-                    if newinv ~= oldinv then
-                        vapeEvents.InventoryChanged:Fire()
-                    end
-
-                    if newinv.inventory.items ~= oldinv.inventory.items then
-                        vapeEvents.InventoryAmountChanged:Fire()
-                        store.tools.sword = getSword()
-                        for _, v in {'stone', 'wood', 'wool'} do
-                            store.tools[v] = getTool(v)
-                        end
-                    end
-                end
-            end
-
             local storeChanged = bedwars.Store.changed:connect(updateStore)
             updateStore(bedwars.Store:getState(), {})
 
@@ -2273,6 +2310,11 @@ end
 local AimAssistEnabled = false
 local aimAssistConnection = nil
 
+local AutoClickerEnabled = false
+local autoClickerThread = nil
+local autoClickerConnections = {}
+local rand = Random.new()
+
 local sortmethods = {
     Damage = function(a, b)
         return a.Health < b.Health
@@ -2407,6 +2449,131 @@ local function disableAimAssist()
     end
     
     debugPrint("AimAssist disabled successfully", "SUCCESS")
+    return true
+end
+
+local function getRandomCPS(min, max)
+    return rand:NextNumber(min, max)
+end
+
+local function enableAutoClicker()
+    if AutoClickerEnabled or not bedwarsLoaded then return false end
+    
+    debugPrint("enableAutoClicker() called", "DEBUG")
+    
+    local success = pcall(function()
+        local function autoClick()
+            debugPrint("AutoClicker: Mouse button pressed, starting auto-click", "DEBUG")
+            
+            if autoClickerThread then
+                task.cancel(autoClickerThread)
+            end
+            
+            autoClickerThread = task.spawn(function()
+                while AutoClickerEnabled do
+                    local canClick = true
+                    pcall(function()
+                        if bedwars.AppController and bedwars.UILayers and bedwars.UILayers.MAIN then
+                            canClick = not bedwars.AppController:isLayerOpen(bedwars.UILayers.MAIN)
+                        end
+                    end)
+                    
+                    if canClick then
+                        local handType = store.hand and store.hand.toolType or "none"
+                        debugPrint("AutoClicker: Hand type is " .. handType, "DEBUG")
+                        
+                        local blockPlacer = bedwars.BlockPlacementController and bedwars.BlockPlacementController.blockPlacer
+                        
+                        if Settings.AutoClickerPlaceBlocks and handType == 'block' and blockPlacer then
+                            debugPrint("AutoClicker: Attempting block placement", "DEBUG")
+                            if (workspace:GetServerTimeNow() - (bedwars.BlockCpsController and bedwars.BlockCpsController.lastPlaceTimestamp or 0)) >= ((1 / 12) * 0.5) then
+                                local mouseinfo = blockPlacer.clientManager:getBlockSelector():getMouseInfo(0)
+                                if mouseinfo and mouseinfo.placementPosition == mouseinfo.placementPosition then
+                                    task.spawn(blockPlacer.placeBlock, blockPlacer, mouseinfo.placementPosition)
+                                end
+                            end
+                            task.wait(1 / getRandomCPS(Settings.AutoClickerBlockCPS, Settings.AutoClickerMaxBlockCPS))
+                        elseif handType == 'sword' then
+                            debugPrint("AutoClicker: Swinging sword", "DEBUG")
+                            if bedwars.SwordController and bedwars.SwordController.swingSwordAtMouse then
+                                bedwars.SwordController:swingSwordAtMouse(0.39)
+                            end
+                            task.wait(1 / getRandomCPS(Settings.AutoClickerCPS, Settings.AutoClickerMaxCPS))
+                        else
+                            debugPrint("AutoClicker: No valid tool, waiting", "DEBUG")
+                            task.wait(0.1)
+                        end
+                    else
+                        task.wait(0.1)
+                    end
+                end
+                debugPrint("AutoClicker: Auto-click loop ended", "DEBUG")
+            end)
+        end
+        
+        local function startAutoClicker(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                debugPrint("AutoClicker: Left mouse button pressed", "DEBUG")
+                autoClick()
+            end
+        end
+        
+        local function stopAutoClicker(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 and autoClickerThread then
+                debugPrint("AutoClicker: Left mouse button released, stopping", "DEBUG")
+                task.cancel(autoClickerThread)
+                autoClickerThread = nil
+            end
+        end
+        
+        table.insert(autoClickerConnections, mainInputService.InputBegan:Connect(startAutoClicker))
+        table.insert(autoClickerConnections, mainInputService.InputEnded:Connect(stopAutoClicker))
+        
+        if mainInputService.TouchEnabled then
+            pcall(function()
+                local mobileButton = lplr.PlayerGui:FindFirstChild("MobileUI")
+                if mobileButton and mobileButton:FindFirstChild("2") then
+                    table.insert(autoClickerConnections, mobileButton["2"].MouseButton1Down:Connect(autoClick))
+                    table.insert(autoClickerConnections, mobileButton["2"].MouseButton1Up:Connect(function()
+                        if autoClickerThread then
+                            task.cancel(autoClickerThread)
+                            autoClickerThread = nil
+                        end
+                    end))
+                    debugPrint("AutoClicker: Mobile support connected", "DEBUG")
+                end
+            end)
+        end
+        
+        AutoClickerEnabled = true
+        debugPrint("AutoClicker enabled successfully", "SUCCESS")
+    end)
+    
+    if not success then
+        debugPrint("enableAutoClicker() failed", "ERROR")
+    end
+    
+    return success
+end
+
+local function disableAutoClicker()
+    if not AutoClickerEnabled then return false end
+    
+    debugPrint("disableAutoClicker() called", "DEBUG")
+    
+    AutoClickerEnabled = false
+    
+    if autoClickerThread then
+        task.cancel(autoClickerThread)
+        autoClickerThread = nil
+    end
+    
+    for _, conn in pairs(autoClickerConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    autoClickerConnections = {}
+    
+    debugPrint("AutoClicker disabled successfully", "SUCCESS")
     return true
 end
 
@@ -3223,6 +3390,9 @@ local function enableAllFeatures()
     if Settings.AimAssistEnabled then
         enableAimAssist()
     end
+    if Settings.AutoClickerEnabled then
+        enableAutoClicker()
+    end
     if Settings.StaffDetectorEnabled then
         enableStaffDetector()
     end
@@ -3244,6 +3414,7 @@ local function disableAllFeatures()
     disableNoFall()
     disableNoSlowdown()
     disableAimAssist()
+    disableAutoClicker()
     disableStaffDetector()
     allFeaturesEnabled = false
     task.spawn(function()
@@ -3357,6 +3528,7 @@ addCleanupFunction(function()
         NotificationGui:Destroy()
     end
     table.clear(staffNotifs)
+    disableAutoClicker()
     disableAllFeatures()
     disableStaffDetector()
     table.clear(strafingPatterns)
