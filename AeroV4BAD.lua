@@ -751,9 +751,9 @@ local Settings = {
     HitBoxesExpandAmount = 75,
     HitBoxesMode = "Player", -- "Sword" or "Player"
     HitFixEnabled = true,
-    InstantPPEnabled = true,
+    InstantPPEnabled = false,
     KitESPEnabled = true,
-    NoFallEnabled = true,
+    NoFallEnabled = false,
     NoFallMode = "Packet", -- "Packet", "Gravity", "Teleport", "Bounce"
     NoSlowdownEnabled = true,
     ProjectileAimbotEnabled = true,
@@ -1540,6 +1540,19 @@ local function getIcon(item)
     return Icons[item] or "rbxassetid://9866757805"
 end
 
+local function addBlur(parent)
+    local blur = Instance.new('ImageLabel')
+    blur.Name = 'Blur'
+    blur.Size = UDim2.new(1, 89, 1, 52)
+    blur.Position = UDim2.fromOffset(-48, -31)
+    blur.BackgroundTransparency = 1
+    blur.Image = 'rbxassetid://8560915132'
+    blur.ScaleType = Enum.ScaleType.Slice
+    blur.SliceCenter = Rect.new(52, 31, 261, 502)
+    blur.Parent = parent
+    return blur
+end
+
 local function KitESPAdded(v, icon)
     if not Settings.KitESPEnabled then return end
     
@@ -1551,6 +1564,7 @@ local function KitESPAdded(v, icon)
     billboard.AlwaysOnTop = true
     billboard.ClipsDescendants = false
     billboard.Adornee = v
+    local blur = addBlur(billboard)
     blur.Visible = true
     local image = Instance.new('ImageLabel')
     image.Size = UDim2.fromOffset(36, 36)
