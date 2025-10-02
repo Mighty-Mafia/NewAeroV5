@@ -2691,7 +2691,7 @@ end
 local movementHistory = {}
 local playerProfiles = {}
 local networkCompensation = 0.1
-local movementAnalysis = {}
+local jumpSpamDetection = {}
 
 local function calculateNetworkCompensation(targetPlayer)
     if not targetPlayer then return networkCompensation end
@@ -2743,177 +2743,104 @@ local function analyzeJumpPattern(history, currentVel, currentTime)
     return jumpPattern
 end
 
-local function analyzeMovementPattern(playerId, currentPos, currentVel, currentTime)
-    if not movementAnalysis[playerId] then
-        movementAnalysis[playerId] = {
-            movementPattern = "linear",
-            strafeFrequency = 0,
-            jumpFrequency = 0,
-            movementConsistency = 0.8,
-            lastPositions = {},
-            lastUpdateTime = 0
+local function detectJumpSpamPattern(playerId, currentVel, currentTime)
+    if not jumpSpamDetection[playerId] then
+        jumpSpamDetection[playerId] = {
+            jumpTimes = {},
+            lastJumpTime = 0,
+            jumpCount = 0,
+            isJumpSpamming = false
         }
     end
     
-    local analysis = movementAnalysis[playerId]
+    local detection = jumpSpamDetection[playerId]
     
-    table.insert(analysis.lastPositions, {pos = currentPos, time = currentTime})
-    
-    while #analysis.lastPositions > 0 and currentTime - analysis.lastPositions[1].time > 1.0 do
-        table.remove(analysis.lastPositions, 1)
-    end
-    
-    if currentTime - analysis.lastUpdateTime > 0.2 then
-        analysis.lastUpdateTime = currentTime
+    if currentVel.Y > 15 then
+        local timeSinceLastJump = currentTime - detection.lastJumpTime
         
-        if #analysis.lastPositions >= 3 then
-            local directionChanges = 0
-            local totalDistance = 0
-            local horizontalMovement = Vector3.zero
+        if timeSinceLastJump > 0.1 then
+            table.insert(detection.jumpTimes, currentTime)
+            detection.lastJumpTime = currentTime
+            detection.jumpCount = detection.jumpCount + 1
             
-            for i = 2, #analysis.lastPositions do
-                local prevPos = analysis.lastPositions[i-1].pos
-                local currPos = analysis.lastPositions[i].pos
-                local prevVel = (currPos - prevPos).Unit
-                
-                if i < #analysis.lastPositions then
-                    local nextPos = analysis.lastPositions[i+1].pos
-                    local currVel = (nextPos - currPos).Unit
-                    
-                    local dot = prevVel:Dot(currVel)
-                    if dot < 0.5 then
-                        directionChanges = directionChanges + 1
-                    end
-                end
-                
-                totalDistance = totalDistance + (currPos - prevPos).Magnitude
-                horizontalMovement = horizontalMovement + Vector3.new(currPos.X - prevPos.X, 0, currPos.Z - prevPos.Z)
+            while #detection.jumpTimes > 0 and currentTime - detection.jumpTimes[1] > 3.0 do
+                table.remove(detection.jumpTimes, 1)
+                detection.jumpCount = math.max(0, detection.jumpCount - 1)
             end
             
-            analysis.strafeFrequency = directionChanges / (#analysis.lastPositions - 2)
-            
-            if analysis.strafeFrequency > 0.4 then
-                analysis.movementPattern = "strafing"
-            elseif currentVel.Y > 15 or currentVel.Y < -10 then
-                analysis.movementPattern = "airborne"
+            if detection.jumpCount >= 3 then
+                local timeSpan = detection.jumpTimes[#detection.jumpTimes] - detection.jumpTimes[1]
+                detection.isJumpSpamming = timeSpan < 2.0
             else
-                analysis.movementPattern = "linear"
+                detection.isJumpSpamming = false
             end
-            
-            local avgSpeed = totalDistance / (currentTime - analysis.lastPositions[1].time)
-            local speedVariance = 0
-            
-            for i = 2, #analysis.lastPositions do
-                local segmentSpeed = (analysis.lastPositions[i].pos - analysis.lastPositions[i-1].pos).Magnitude / 
-                                   (analysis.lastPositions[i].time - analysis.lastPositions[i-1].time)
-                speedVariance = speedVariance + math.abs(segmentSpeed - avgSpeed)
-            end
-            
-            analysis.movementConsistency = 1 - math.min(speedVariance / (#analysis.lastPositions - 1) / math.max(avgSpeed, 1), 1)
         end
     end
     
-    return analysis
+    return detection
 end
 
-local function getDistanceBasedPrediction(distance, timeToTarget, currentVel, horizontalVel, analysis, isJumping, isFalling)
-    local horizontalPrediction = Vector3.zero
+local function getDistanceBasedPrediction(targetVel, timeToTarget, distance, isJumping, isFalling, isJumpSpamming)
+    local verticalVel = targetVel.Y
     local verticalPrediction = 0
     
-    if distance < 20 then
-        horizontalPrediction = horizontalVel * timeToTarget * 0.3
-        verticalPrediction = currentVel.Y * timeToTarget * 0.1
-        
-    elseif distance < 50 then
-        horizontalPrediction = horizontalVel * timeToTarget * 0.6
-        
-        if analysis.movementPattern == "strafing" then
-            horizontalPrediction = horizontalPrediction * 1.2
+    if distance < 25 then
+        if isJumping then
+            verticalPrediction = verticalVel * timeToTarget * 0.05
+        elseif isFalling then
+            verticalPrediction = verticalVel * timeToTarget * 0.08
+        else
+            verticalPrediction = 0
         end
         
-        verticalPrediction = currentVel.Y * timeToTarget * 0.2
-        
-    else
-        horizontalPrediction = horizontalVel * timeToTarget * 0.8
-        
-        if analysis.movementPattern == "strafing" then
-            horizontalPrediction = horizontalPrediction * 1.3
+    elseif distance < 60 then
+        if isJumping then
+            verticalPrediction = verticalVel * timeToTarget * 0.1
+        elseif isFalling then
+            verticalPrediction = verticalVel * timeToTarget * 0.15
+        else
+            verticalPrediction = verticalVel * timeToTarget * 0.05
         end
         
-        verticalPrediction = currentVel.Y * timeToTarget * 0.3
-    end
-    
-    horizontalPrediction = horizontalPrediction * analysis.movementConsistency
-    
-    if isJumping then
-        verticalPrediction = math.min(verticalPrediction, 8)
-    elseif isFalling then
-        verticalPrediction = math.max(verticalPrediction, -10)
     else
-        verticalPrediction = math.clamp(verticalPrediction, -5, 5)
+        if isJumpSpamming then
+            verticalPrediction = verticalVel * timeToTarget * 0.06
+        elseif isJumping then
+            verticalPrediction = verticalVel * timeToTarget * 0.12
+        elseif isFalling then
+            verticalPrediction = verticalVel * timeToTarget * 0.18
+        else
+            verticalPrediction = verticalVel * timeToTarget * 0.08
+        end
     end
-    
-    return horizontalPrediction, verticalPrediction
-end
-
-local function calculateOptimalSmoothness(distance, projSpeed, movementPattern)
-    local baseSmoothness = 0.25
     
     if distance < 25 then
-        baseSmoothness = 0.35
-    elseif distance > 80 then
-        baseSmoothness = 0.15
+        verticalPrediction = math.clamp(verticalPrediction, -2, 1.5)
+    elseif distance < 60 then
+        verticalPrediction = math.clamp(verticalPrediction, -4, 3)
+    else
+        verticalPrediction = math.clamp(verticalPrediction, -6, 5)
     end
-    
-    local speedFactor = math.clamp(projSpeed / 120, 0.6, 1.4)
-    baseSmoothness = baseSmoothness * (1 / speedFactor)
-    
-    if movementPattern == "strafing" then
-        baseSmoothness = baseSmoothness * 0.8
-    elseif movementPattern == "airborne" then
-        baseSmoothness = baseSmoothness * 1.2
-    end
-    
-    return math.clamp(baseSmoothness, 0.1, 0.4)
-end
-
-local function calculateRelativeVerticalPrediction(targetPos, targetVel, myPos, myVel, timeToTarget, isTargetJumping, isTargetFalling)
-    local relativeHeight = targetPos.Y - myPos.Y
-    local relativeVerticalVel = targetVel.Y - myVel.Y
-    
-    local verticalPrediction = relativeVerticalVel * timeToTarget * 0.4
-    
-    if relativeHeight > 5 then
-        verticalPrediction = verticalPrediction + (relativeHeight * 0.1)
-    elseif relativeHeight < -5 then
-        verticalPrediction = verticalPrediction + (relativeHeight * 0.15)
-    end
-    
-    if isTargetJumping then
-        verticalPrediction = verticalPrediction + (targetVel.Y * timeToTarget * 0.2)
-    elseif isTargetFalling then
-        verticalPrediction = verticalPrediction + (targetVel.Y * timeToTarget * 0.3)
-    end
-    
-    verticalPrediction = math.clamp(verticalPrediction, -15, 12)
     
     return verticalPrediction
 end
 
-local function shouldApplyVerticalPrediction(distance, isTargetJumping, isTargetFalling, relativeHeight)
-    if distance < 15 then
-        return false
+local function getDistanceBasedHorizontal(timeToTarget, distance, horizontalVel, isJumpSpamming)
+    local horizontalMultiplier = 0.7
+    
+    if distance < 25 then
+        horizontalMultiplier = 0.5
+    elseif distance < 60 then
+        horizontalMultiplier = 0.7
+    else
+        if isJumpSpamming then
+            horizontalMultiplier = 0.6
+        else
+            horizontalMultiplier = 0.8
+        end
     end
     
-    if isTargetJumping or isTargetFalling then
-        return true
-    end
-    
-    if distance > 25 then
-        return true
-    end
-    
-    return false
+    return horizontalVel * timeToTarget * horizontalMultiplier
 end
 
 local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, gravity, origin)
@@ -3018,49 +2945,100 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
     local timeSinceDirectionChange = currentTime - history.lastDirectionChange
     
     local isStrafing = horizontalSpeed > 8 and directionChanges >= 1
-    local isJumping = currentVel.Y > 20
-    local isFalling = currentVel.Y < -15
-
-    local analysis = analyzeMovementPattern(playerId, compensatedPos, currentVel, currentTime)
+    local isJumping = currentVel.Y > 15
+    local isFalling = currentVel.Y < -12
     
-    local horizontalPrediction, verticalPrediction = getDistanceBasedPrediction(
-        distance, timeToTarget, currentVel, horizontalVel, analysis, isJumping, isFalling
-    )
-
-    if #history.accelerations > 0 then
-        local avgAccel = Vector3.zero
-        for _, accel in ipairs(history.accelerations) do
-            avgAccel = avgAccel + accel
-        end
-        avgAccel = avgAccel / #history.accelerations
+    if isStrafing then
+        history.strafeIntensity = math.min(horizontalSpeed / 16, 1.0)
         
-        local accelerationEffect = 0.5 * avgAccel * timeToTarget * timeToTarget * analysis.movementConsistency
-        horizontalPrediction = horizontalPrediction + Vector3.new(accelerationEffect.X, 0, accelerationEffect.Z)
+        local strafeDirection = horizontalVel.Unit
+        local strafePredictability = history.movementConsistency
+        
+        local willChangeDirection = timeSinceDirectionChange > 0.4 and math.random() < 0.3
+        if willChangeDirection then
+            strafeDirection = -strafeDirection
+        end
+        
+        local strafeDistance = horizontalSpeed * timeToTarget * 0.6 * history.strafeIntensity
+        local strafeOffset = strafeDirection * strafeDistance
+        
+        local verticalOffset = Vector3.zero
+        if isJumping then
+            local jumpStrength = math.min(math.abs(currentVel.Y) / 50, 1.0)
+            local smallJumpOffset = jumpStrength * 2.5
+            verticalOffset = Vector3.new(0, smallJumpOffset, 0)
+        elseif isFalling then
+            local fallStrength = math.min(math.abs(currentVel.Y) / 30, 1.5)
+            local fallOffset = -fallStrength * 3.0
+            verticalOffset = Vector3.new(0, fallOffset, 0)
+        end
+        
+        local finalPrediction = compensatedPos + strafeOffset + verticalOffset + (currentVel * timeToTarget * 0.3)
+        history.predictionConfidence = 0.7 * strafePredictability
+        
+        return finalPrediction
+        
+    elseif isJumping or isFalling then
+        local jumpSpamInfo = detectJumpSpamPattern(playerId, currentVel, currentTime)
+        local isJumpSpamming = jumpSpamInfo.isJumpSpamming
+        
+        local horizontalPrediction = getDistanceBasedHorizontal(timeToTarget, distance, horizontalVel, isJumpSpamming)
+        
+        local verticalPrediction = getDistanceBasedPrediction(currentVel, timeToTarget, distance, isJumping, isFalling, isJumpSpamming)
+        
+        local finalPrediction = Vector3.new(
+            compensatedPos.X + horizontalPrediction.X,
+            compensatedPos.Y + verticalPrediction,
+            compensatedPos.Z + horizontalPrediction.Z
+        )
+        
+        local baseConfidence = 0.85
+        if distance < 25 then
+            baseConfidence = 0.95
+        elseif distance > 60 then
+            baseConfidence = 0.75
+        end
+        
+        history.predictionConfidence = baseConfidence * history.movementConsistency
+        
+        return finalPrediction
+        
+    else
+        local consistencyMultiplier = history.movementConsistency
+        
+        local baseMultiplier = 0.7
+        if distance < 25 then
+            baseMultiplier = 0.5
+        elseif distance > 60 then
+            baseMultiplier = 0.8
+        end
+        
+        local baseMovement = currentVel * timeToTarget * baseMultiplier
+        
+        if #history.accelerations > 0 then
+            local avgAccel = Vector3.zero
+            for _, accel in ipairs(history.accelerations) do
+                avgAccel = avgAccel + accel
+            end
+            avgAccel = avgAccel / #history.accelerations
+            
+            local accelerationEffect = 0.5 * avgAccel * timeToTarget * timeToTarget
+            baseMovement = baseMovement + accelerationEffect * consistencyMultiplier
+        end
+        
+        local finalPrediction = compensatedPos + baseMovement
+        
+        local baseConfidence = 0.9
+        if distance < 25 then
+            baseConfidence = 0.95
+        elseif distance > 60 then
+            baseConfidence = 0.8
+        end
+        
+        history.predictionConfidence = baseConfidence * consistencyMultiplier
+        
+        return finalPrediction
     end
-
-    local myPos = origin
-    local myVel = entitylib.isAlive and entitylib.character.RootPart.Velocity or Vector3.zero
-    local relativeHeight = compensatedPos.Y - myPos.Y
-
-    if math.abs(relativeHeight) > 3 then
-        local heightAdjustment = relativeHeight * 0.05 * math.clamp(distance / 50, 0.2, 1.0)
-        verticalPrediction = verticalPrediction + heightAdjustment
-    end
-
-    local finalPrediction = Vector3.new(
-        compensatedPos.X + horizontalPrediction.X,
-        compensatedPos.Y + verticalPrediction,
-        compensatedPos.Z + horizontalPrediction.Z
-    )
-
-    local baseConfidence = 0.8
-    local distanceConfidence = math.clamp(1 - (distance / 100), 0.5, 1.0)
-    local movementConfidence = analysis.movementConsistency
-    local patternConfidence = analysis.movementPattern == "linear" and 1.0 or 0.7
-
-    history.predictionConfidence = baseConfidence * distanceConfidence * movementConfidence * patternConfidence
-
-    return finalPrediction
 end
 
 local function smoothAim(currentCFrame, targetPosition, smoothnessFactor, maxAngleChange, dt, distance, projSpeed)
@@ -3181,20 +3159,17 @@ local function enableProjectileAimbot()
                 end
 
                 local distanceToTarget = (predictedPosition - offsetpos).Magnitude
+                local smoothness = 0.22
 
-                local targetAnalysis = movementAnalysis[plr.Player.UserId]
-                local movementPattern = targetAnalysis and targetAnalysis.movementPattern or "linear"
-
-                local optimalSmoothness = calculateOptimalSmoothness(distanceToTarget, projSpeed, movementPattern)
-                local maxAngle = math.rad(4)
-
-                if distanceToTarget > 60 then
-                    maxAngle = math.rad(3)
-                elseif distanceToTarget < 20 then
-                    maxAngle = math.rad(5)
+                if distanceToTarget > 80 then
+                    smoothness = 0.15
+                elseif distanceToTarget > 40 then
+                    smoothness = 0.18
+                else
+                    smoothness = 0.25
                 end
 
-                local newlook = smoothAim(rawLook, predictedPosition, optimalSmoothness, maxAngle, nil, distanceToTarget, projSpeed)
+                local newlook = smoothAim(rawLook, predictedPosition, smoothness, math.rad(4), nil, distanceToTarget, projSpeed)
                 
                 if projmeta.projectile ~= 'owl_projectile' then
                     newlook = newlook * CFrame.new(
