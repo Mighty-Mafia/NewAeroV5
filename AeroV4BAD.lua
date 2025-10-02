@@ -636,9 +636,9 @@ local Settings = {
     UninjectKeybind = "RightAlt",
     VelocityChance = 100,
     VelocityEnabled = true,
-    VelocityHorizontal = 63,
+    VelocityHorizontal = 83,
     VelocityTargetCheck = false,
-    VelocityVertical = 63,
+    VelocityVertical = 83,
 }
 
 pcall(function()
@@ -1572,7 +1572,7 @@ local function hookClientGet()
             return {
                 instance = call.instance,
                 SendToServer = function(_, attackTable, ...)
-                    if attackTable and attackTable.validate and HitFixEnabled then
+                    if attackTable and attackTable.validate then
                         local selfpos = attackTable.validate.selfPosition and attackTable.validate.selfPosition.value
                         local targetpos = attackTable.validate.targetPosition and attackTable.validate.targetPosition.value
                         
@@ -1580,15 +1580,9 @@ local function hookClientGet()
                             store.attackReach = ((selfpos - targetpos).Magnitude * 100) // 1 / 100
                             store.attackReachUpdate = tick() + 1
                             
-                            local distance = (selfpos - targetpos).Magnitude
-                            local reachExtension = math.min(distance - 14.399, 3.5)
-                            
-                            if reachExtension > 0 then
-                                attackTable.validate.selfPosition.value = selfpos + CFrame.lookAt(selfpos, targetpos).LookVector * reachExtension
-                                
-                                if attackTable.validate.raycast then
-                                    attackTable.validate.raycast.origin = attackTable.validate.selfPosition.value
-                                end
+                            if HitFixEnabled then
+                                attackTable.validate.raycast = attackTable.validate.raycast or {}
+                                attackTable.validate.selfPosition.value = selfpos + CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
                             end
                         end
                     end
@@ -1602,8 +1596,7 @@ local function hookClientGet()
 end
 
 local originalReachDistance = nil
-local REACH_DISTANCE = 21
-local remotes = {}
+local REACH_DISTANCE = 18
 
 local function setupHitFix()
     if not bedwarsLoaded or not swordController then return false end
@@ -1617,22 +1610,9 @@ local function setupHitFix()
                     originalFunctions[funcName] = original
                     swordController[funcName] = function(self, ...)
                         local args = {...}
-                        
                         for i, arg in pairs(args) do
                             if type(arg) == "table" and arg.validate then
-                                if arg.validate.raycast then
-                                    arg.validate.raycast = nil
-                                end
-                                if arg.validate.targetPosition then
-                                    local currentPos = arg.validate.selfPosition and arg.validate.selfPosition.value
-                                    local targetPos = arg.validate.targetPosition.value
-                                    if currentPos and targetPos then
-                                        local distance = (currentPos - targetPos).Magnitude
-                                        if distance > 15 then
-                                            arg.validate.selfPosition.value = currentPos + (targetPos - currentPos).Unit * math.min(distance - 14.5, 2.5)
-                                        end
-                                    end
-                                end
+                                args[i].validate = nil
                             end
                         end
                         return original(self, unpack(args))
@@ -1651,14 +1631,7 @@ local function setupHitFix()
         local success = pcall(function()
             if swordController and swordController.swingSwordAtMouse then
                 debug.setconstant(swordController.swingSwordAtMouse, 23, enabled and 'raycast' or 'Raycast')
-                debug.setupvalue(swingSwordAtMouse, 4, enabled and bedwars.QueryUtil or workspace)
-                
-                local constants = debug.getconstants(swordController.swingSwordAtMouse)
-                for i, v in pairs(constants) do
-                    if type(v) == "number" and v == 3.8 then
-                        debug.setconstant(swordController.swingSwordAtMouse, i, enabled and 21 or 3.8)
-                    end
-                end
+                debug.setupvalue(swordController.swingSwordAtMouse, 4, enabled and bedwars.QueryUtil or workspace)
             end
         end)
         return success
@@ -1671,17 +1644,10 @@ local function setupHitFix()
                     if originalReachDistance == nil then
                         originalReachDistance = bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE
                     end
-                    bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = 21
-                    
-                    if bedwars.CombatConstant.RAYCAST_SWORD_BLOCK_DISTANCE then
-                        bedwars.CombatConstant.RAYCAST_SWORD_BLOCK_DISTANCE = 21
-                    end
+                    bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = 18 + 2
                 else
                     if originalReachDistance ~= nil then
                         bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = originalReachDistance
-                        if bedwars.CombatConstant.RAYCAST_SWORD_BLOCK_DISTANCE then
-                            bedwars.CombatConstant.RAYCAST_SWORD_BLOCK_DISTANCE = originalReachDistance
-                        end
                     end
                 end
                 return true
@@ -1700,6 +1666,7 @@ local function setupHitFix()
     local debugSuccess = applyDebugPatch(HitFixEnabled)
     local reachSuccess = applyReach(HitFixEnabled)
 
+
     return hookSuccess and reachSuccess
 end
 
@@ -1714,9 +1681,6 @@ local function disableHitFix()
     if not bedwarsLoaded then return false end
     HitFixEnabled = false
     local success = setupHitFix()
-    if success then
-        debugPrint("Enhanced HitFix disabled successfully", "SUCCESS")
-    end
     return success
 end
 
