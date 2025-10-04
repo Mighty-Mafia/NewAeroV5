@@ -1586,6 +1586,24 @@ local queryUtil = nil
 local originalFunctions = {}
 local OldGet = nil
 
+local function getPingCompensation()
+    local ping = 0
+    pcall(function()
+        local stats = game:GetService("Stats")
+        ping = stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    
+    if ping < 50 then
+        return 1.0  
+    elseif ping < 100 then
+        return 1.2  
+    elseif ping < 200 then
+        return 1.5  
+    else
+        return 2.0
+    end
+end
+
 local function hookClientGet()
     if not bedwars.Client or OldGet then return end
     
@@ -1597,7 +1615,7 @@ local function hookClientGet()
             return {
                 instance = call.instance,
                 SendToServer = function(_, attackTable, ...)
-                    if attackTable and attackTable.validate then
+                    if attackTable and attackTable.validate and HitFixEnabled then
                         local selfpos = attackTable.validate.selfPosition and attackTable.validate.selfPosition.value
                         local targetpos = attackTable.validate.targetPosition and attackTable.validate.targetPosition.value
                         
@@ -1605,9 +1623,25 @@ local function hookClientGet()
                             store.attackReach = ((selfpos - targetpos).Magnitude * 100) // 1 / 100
                             store.attackReachUpdate = tick() + 1
                             
-                            if HitFixEnabled then
+                            local distance = (selfpos - targetpos).Magnitude
+                            local pingCompensation = 0
+                            
+                            pcall(function()
+                                local stats = game:GetService("Stats")
+                                local ping = stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+                                pingCompensation = math.min(ping / 1000 * 50, 8) 
+                            end)
+                            
+                            local adjustmentDistance = math.max(distance - 12, 0) + pingCompensation
+                            
+                            if adjustmentDistance > 0 then
                                 attackTable.validate.raycast = attackTable.validate.raycast or {}
-                                attackTable.validate.selfPosition.value = selfpos + CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
+                                local direction = CFrame.lookAt(selfpos, targetpos).LookVector
+                                attackTable.validate.selfPosition.value = selfpos + (direction * adjustmentDistance)
+                                
+                                if pingCompensation > 2 then
+                                    attackTable.validate.targetPosition.value = targetpos - (direction * math.min(pingCompensation * 0.3, 2))
+                                end
                             end
                         end
                     end
@@ -1636,11 +1670,6 @@ local function setupHitFix()
                     originalFunctions[funcName] = original
                     swordController[funcName] = function(self, ...)
                         local args = {...}
-                        for i, arg in pairs(args) do
-                            if type(arg) == "table" and arg.validate then
-                                args[i].validate = nil
-                            end
-                        end
                         return original(self, unpack(args))
                     end
                 end
@@ -1670,7 +1699,9 @@ local function setupHitFix()
                     if originalReachDistance == nil then
                         originalReachDistance = bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE
                     end
-                    bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = 18 + 2
+                    local pingMultiplier = getPingCompensation()
+                    local additionalReach = 2 * pingMultiplier
+                    bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = 18 + math.min(additionalReach, 6)
                 else
                     if originalReachDistance ~= nil then
                         bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = originalReachDistance
