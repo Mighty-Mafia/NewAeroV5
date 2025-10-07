@@ -605,7 +605,7 @@ local Settings = {
     AutoClickerPlaceBlocks = true,
     AutoToolEnabled = true,
     DebugMode = true, -- for aero to debug shi
-    GUIEnabled = true,
+    GUIEnabled = false,
     FastBreakEnabled = true,
     FastBreakSpeed = 0.22,
     HitBoxesDisableKeybind = "X",
@@ -1701,7 +1701,7 @@ local function setupHitFix()
                     end
                     local pingMultiplier = getPingCompensation()
                     local additionalReach = 2 * pingMultiplier
-                    bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = 18 + math.min(additionalReach, 6) -- Max +6 reach
+                    bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = 18 + math.min(additionalReach, 6) 
                 else
                     if originalReachDistance ~= nil then
                         bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = originalReachDistance
@@ -2786,6 +2786,197 @@ end
 local movementHistory = {}
 local strafingPatterns = {}
 
+local function analyzeMovementPattern(history, currentPos, currentVel, currentTime)
+    if #history.positions < 2 then
+        return {pattern = "linear", confidence = 0.3}
+    end
+    
+    local horizontalVel = Vector3.new(currentVel.X, 0, currentVel.Z)
+    local horizontalSpeed = horizontalVel.Magnitude
+    local verticalSpeed = currentVel.Y
+    
+    local directionChanges = 0
+    local speedVariance = 0
+    local totalHorizontal = Vector3.zero
+    local verticalHistory = {}
+    
+    for i = 2, #history.velocities do
+        local prevVel = history.velocities[i-1].vel
+        local currVel = history.velocities[i].vel
+        
+        local prevHorizontal = Vector3.new(prevVel.X, 0, prevVel.Z)
+        local currHorizontal = Vector3.new(currVel.X, 0, currVel.Z)
+        
+        if prevHorizontal.Magnitude > 2 and currHorizontal.Magnitude > 2 then
+            local dot = prevHorizontal.Unit:Dot(currHorizontal.Unit)
+            if dot < 0.7 then
+                directionChanges = directionChanges + 1
+                history.lastStrafeChange = currentTime
+            end
+        end
+        
+        table.insert(verticalHistory, currVel.Y)
+        speedVariance = speedVariance + math.abs(prevVel.Magnitude - currVel.Magnitude)
+        totalHorizontal = totalHorizontal + currHorizontal
+    end
+    
+    history.directionBias = totalHorizontal / math.max(#history.velocities - 1, 1)
+    
+    local avgVertical = 0
+    for _, vy in ipairs(verticalHistory) do
+        avgVertical = avgVertical + vy
+    end
+    avgVertical = avgVertical / #verticalHistory
+    
+    local isJumping = currentVel.Y > 5 and avgVertical > 2
+    local isPeakJump = currentVel.Y > -2 and currentVel.Y < 5 and #verticalHistory >= 3 and verticalHistory[#verticalHistory-2] > 8
+    local isFallingFromJump = currentVel.Y < -5 and avgVertical < -2 and math.abs(currentVel.Y) < 25
+    local isFastFalling = currentVel.Y < -25
+    local isClutching = currentVel.Y < -10 and horizontalSpeed < 3
+    
+    local isStrafing = directionChanges >= 2 and horizontalSpeed > 5
+    local isSprinting = horizontalSpeed > 10 and directionChanges <= 1
+    local isWalking = horizontalSpeed > 2 and horizontalSpeed <= 10
+    local isStationary = horizontalSpeed < 1.5
+    
+    local timeSinceStrafeChange = currentTime - history.lastStrafeChange
+    
+    local confidence = 0.7
+    if isStrafing then
+        confidence = 0.65 + (math.min(timeSinceStrafeChange / 1.5, 1.0) * 0.25)
+    elseif isStationary then
+        confidence = 0.95
+    elseif isSprinting then
+        confidence = 0.85
+    elseif isFastFalling then
+        confidence = 0.8
+    elseif isClutching then
+        confidence = 0.6
+    end
+    
+    local pattern = "linear"
+    
+    if isFastFalling then
+        pattern = "fast_falling"
+    elseif isClutching then
+        pattern = "clutching"
+    elseif isFallingFromJump then
+        pattern = "falling_from_jump"
+    elseif isPeakJump then
+        pattern = "peak_jump"
+    elseif isJumping then
+        pattern = "jumping"
+    elseif isStrafing then 
+        pattern = "strafing"
+    elseif isSprinting then 
+        pattern = "sprinting" 
+    elseif isWalking then 
+        pattern = "walking"
+    elseif isStationary then 
+        pattern = "stationary" 
+    end
+    
+    history.lastVerticalState = pattern
+    history.verticalVelocity = currentVel.Y
+    
+    return {pattern = pattern, confidence = confidence}
+end
+
+local function calculateOptimizedPrediction(pattern, history, currentPos, currentVel, timeToTarget, distance, origin, currentTime)
+    local horizontalVel = Vector3.new(currentVel.X, 0, currentVel.Z)
+    local horizontalSpeed = horizontalVel.Magnitude
+    local verticalVel = currentVel.Y
+    
+    local elevationDifference = currentPos.Y - origin.Y
+    local horizontalDistance = (Vector3.new(currentPos.X, 0, currentPos.Z) - Vector3.new(origin.X, 0, origin.Z)).Magnitude
+    
+    local horizontalPrediction = Vector3.zero
+    local verticalPrediction = 0
+    
+    if pattern == "strafing" then
+        local timeSinceChange = currentTime - history.lastStrafeChange
+        local strafeDuration = 0.5 + (math.random() * 0.4)
+        
+        if timeSinceChange < strafeDuration * 0.3 then
+            horizontalPrediction = horizontalVel * timeToTarget * 0.7
+        elseif timeSinceChange > strafeDuration * 0.7 then
+            local currentDirection = horizontalVel.Unit
+            local predictedDirection = -currentDirection
+            if history.directionBias.Magnitude > 0.2 then
+                predictedDirection = history.directionBias.Unit
+            end
+            horizontalPrediction = predictedDirection * horizontalSpeed * timeToTarget * 0.8
+        else
+            horizontalPrediction = horizontalVel * timeToTarget * 0.4
+        end
+        
+    elseif pattern == "sprinting" then
+        horizontalPrediction = horizontalVel * timeToTarget * 0.6
+        
+    elseif pattern == "walking" then
+        horizontalPrediction = horizontalVel * timeToTarget * 0.3
+        
+    elseif pattern == "stationary" then
+        horizontalPrediction = Vector3.zero
+        
+    else
+        horizontalPrediction = horizontalVel * timeToTarget * 0.4
+    end
+    
+    if pattern == "jumping" then
+        local jumpStrength = math.min(verticalVel / 15, 1.0)
+        verticalPrediction = verticalVel * timeToTarget * 0.3 * jumpStrength
+        
+    elseif pattern == "peak_jump" then
+        verticalPrediction = verticalVel * timeToTarget * 0.1
+        
+    elseif pattern == "falling_from_jump" then
+        local fallTime = math.min(timeToTarget, 0.8)
+        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * 0.2)
+        
+    elseif pattern == "fast_falling" then
+        local fallTime = math.min(timeToTarget, 1.2)
+        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * 0.3)
+        
+    elseif pattern == "clutching" then
+        verticalPrediction = verticalVel * timeToTarget * 0.1
+        horizontalPrediction = horizontalPrediction * 0.2
+        
+    else
+        verticalPrediction = verticalVel * timeToTarget * 0.2
+    end
+    
+    local gravityCompensation = 0
+    if horizontalDistance > 40 then
+        gravityCompensation = math.min(horizontalDistance * 0.02, 3)
+        
+        if elevationDifference < -8 then
+            gravityCompensation = gravityCompensation * 0.2
+        elseif elevationDifference > 8 then
+            gravityCompensation = gravityCompensation * 0.6
+        else
+            gravityCompensation = gravityCompensation * 0.4
+        end
+    end
+    
+    verticalPrediction = verticalPrediction + gravityCompensation
+    
+    local torsoOffset = 0
+    if pattern == "stationary" or pattern == "walking" or pattern == "strafing" or pattern == "sprinting" or pattern == "linear" then
+        torsoOffset = -2.5
+        verticalPrediction = verticalPrediction + torsoOffset
+    end
+    
+    local basePrediction = currentPos + horizontalPrediction + Vector3.new(0, verticalPrediction, 0)
+    
+    if horizontalDistance > 50 then
+        local leadMultiplier = math.min(horizontalDistance / 100, 1.5)
+        basePrediction = basePrediction + (horizontalVel * timeToTarget * 0.1 * leadMultiplier)
+    end
+    
+    return basePrediction
+end
+
 local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, gravity, origin)
     if not targetPlayer or not targetPlayer.Character or not targetPart then 
         return targetPart and targetPart.Position or Vector3.zero
@@ -2799,180 +2990,92 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
         movementHistory[playerId] = {
             positions = {},
             velocities = {},
-            accelerations = {},
             timestamps = {},
-            directionChanges = 0,
-            pattern = "linear",
-            strafeIntensity = 0,
-            movementHabits = {
-                strafeFrequency = 0,
-                jumpFrequency = 0,
-                directionPreference = 0,
-                predictability = 0.5
-            },
-            lastDirectionChange = 0,
-            predictionConfidence = 0
+            movementPatterns = {},
+            lastPatternChange = 0,
+            predictionConfidence = 0.5,
+            lastStrafeChange = 0,
+            directionBias = Vector3.zero,
+            lastVerticalState = "unknown",
+            verticalVelocity = 0
         }
     end
     
     local history = movementHistory[playerId]
     local currentTime = tick()
     
-    table.insert(history.positions, currentPos)
-    table.insert(history.velocities, currentVel)
+    table.insert(history.positions, {pos = currentPos, time = currentTime})
+    table.insert(history.velocities, {vel = currentVel, time = currentTime})
     table.insert(history.timestamps, currentTime)
-    
-    if #history.velocities >= 2 then
-        local lastVel = history.velocities[#history.velocities - 1]
-        local timeDiff = currentTime - history.timestamps[#history.timestamps - 1]
-        if timeDiff > 0 then
-            local acceleration = (currentVel - lastVel) / timeDiff
-            table.insert(history.accelerations, acceleration)
-        end
-    end
     
     while #history.timestamps > 0 and currentTime - history.timestamps[1] > 2.0 do
         table.remove(history.positions, 1)
         table.remove(history.velocities, 1)
-        table.remove(history.accelerations, 1)
         table.remove(history.timestamps, 1)
     end
     
     local distance = (currentPos - origin).Magnitude
-    local timeToTarget = distance / projSpeed
+    local baseTimeToTarget = distance / projSpeed
     
-    local basePrediction = currentPos + (currentVel * timeToTarget * 0.4)
+    local timeToTarget = baseTimeToTarget
     
-    if #history.positions < 3 then
-        return basePrediction
-    end
+    local movementAnalysis = analyzeMovementPattern(history, currentPos, currentVel, currentTime)
+    local pattern = movementAnalysis.pattern
+    local confidence = movementAnalysis.confidence
     
-    local directionChanges = 0
-    local avgSpeed = 0
-    local horizontalMovement = Vector3.zero
-    local verticalMovement = 0
-    local strafePattern = {}
-    
-    for i = 2, #history.velocities do
-        local prevVel = history.velocities[i-1]
-        local currVel = history.velocities[i]
-        local timeDiff = history.timestamps[i] - history.timestamps[i-1]
-        
-        if timeDiff > 0 then
-            local prevHorizontal = Vector3.new(prevVel.X, 0, prevVel.Z)
-            local currHorizontal = Vector3.new(currVel.X, 0, currVel.Z)
-            
-            if currHorizontal.Magnitude > 1 then
-                avgSpeed = avgSpeed + currHorizontal.Magnitude
-                
-                if prevHorizontal.Magnitude > 1 then
-                    local dot = prevHorizontal.Unit:Dot(currHorizontal.Unit)
-                    if dot < 0.6 then
-                        directionChanges = directionChanges + 1
-                        history.lastDirectionChange = currentTime
-                    end
-                end
-                
-                horizontalMovement = horizontalMovement + currHorizontal
-                
-                if math.abs(currVel.X) > math.abs(currVel.Z) then
-                    table.insert(strafePattern, currVel.X > 0 and "right" or "left")
-                else
-                    table.insert(strafePattern, currVel.Z > 0 and "forward" or "backward")
-                end
-            end
-            
-            if math.abs(currVel.Y) > 2 then
-                verticalMovement = verticalMovement + currVel.Y
-            end
-        end
-    end
-    
-    if #history.velocities > 1 then
-        avgSpeed = avgSpeed / (#history.velocities - 1)
-    end
-    
-    local timeSinceDirectionChange = currentTime - history.lastDirectionChange
-    local isStrafing = directionChanges >= 2 and avgSpeed > 3
-    local isJumping = math.abs(currentVel.Y) > 8
-    local isFalling = currentVel.Y < -15
-    
-    if isStrafing and avgSpeed > 4 then
-        history.pattern = "strafing"
-        history.strafeIntensity = math.min(avgSpeed / 12, 1.0)
-        
-        local strafeCycleTime = 0.8
-        local timeInCycle = timeSinceDirectionChange % strafeCycleTime
-        local cycleProgress = timeInCycle / strafeCycleTime
-        
-        local willChangeDirection = cycleProgress > 0.7
-        local predictedDirection = horizontalMovement.Unit
-        
-        if willChangeDirection then
-            predictedDirection = -predictedDirection
-            history.predictionConfidence = 0.8
-        else
-            history.predictionConfidence = 0.6
-        end
-        
-        local strafeMagnitude = avgSpeed * timeToTarget * 0.4 * history.strafeIntensity
-        local strafePrediction = predictedDirection * strafeMagnitude
-        
-        local randomFactor = (1 - history.movementHabits.predictability) * 0.3
-        local randomOffset = Vector3.new(
-            (math.random() - 0.5) * randomFactor * strafeMagnitude,
-            0,
-            (math.random() - 0.5) * randomFactor * strafeMagnitude
-        )
-        
-        return currentPos + strafePrediction + randomOffset + (currentVel * timeToTarget * 0.2)
-        
-    elseif isJumping or isFalling then
-        history.pattern = "airborne"
-        
-        local airTimeFactor = 0.7
-        local gravityEffect = 0.5 * gravity * timeToTarget * timeToTarget
-        
-        if isFalling then
-            local estimatedLandTime = math.abs(currentVel.Y / gravity)
-            if estimatedLandTime < timeToTarget then
-                local landPosition = currentPos + Vector3.new(
-                    currentVel.X * estimatedLandTime,
-                    currentVel.Y * estimatedLandTime + 0.5 * gravity * estimatedLandTime * estimatedLandTime,
-                    currentVel.Z * estimatedLandTime
-                )
-                return landPosition + (currentVel * (timeToTarget - estimatedLandTime) * 0.3)
-            end
-        end
-        
-        local airPrediction = currentPos + (currentVel * timeToTarget * airTimeFactor)
-        airPrediction = Vector3.new(
-            airPrediction.X,
-            airPrediction.Y + currentVel.Y * timeToTarget + gravityEffect,
-            airPrediction.Z
-        )
-        
-        return airPrediction
-        
+    if pattern == "strafing" then
+        timeToTarget = baseTimeToTarget * 0.8
+    elseif pattern == "fast_falling" then
+        timeToTarget = baseTimeToTarget * 1.1
+    elseif pattern == "clutching" then
+        timeToTarget = baseTimeToTarget * 0.6
     else
-        history.pattern = "linear"
-        history.strafeIntensity = 0
-        
-        local finalPrediction = basePrediction
-        
-        if #history.accelerations > 0 then
-            local avgAcceleration = Vector3.zero
-            for _, accel in ipairs(history.accelerations) do
-                avgAcceleration = avgAcceleration + accel
-            end
-            avgAcceleration = avgAcceleration / #history.accelerations
-            
-            local accelerationPrediction = 0.5 * avgAcceleration * timeToTarget * timeToTarget
-            finalPrediction = finalPrediction + accelerationPrediction
-        end
-        
-        return finalPrediction
+        timeToTarget = baseTimeToTarget * 0.9
     end
+    
+    local predictedPosition = calculateOptimizedPrediction(
+        pattern, 
+        history, 
+        currentPos, 
+        currentVel, 
+        timeToTarget, 
+        distance,
+        origin,
+        currentTime
+    )
+    
+    local finalPrediction = predictedPosition
+    if confidence < 0.8 then
+        local blend = 0.3 * (1 - confidence)
+        finalPrediction = finalPrediction:Lerp(currentPos, blend)
+    end
+    
+    history.predictionConfidence = confidence
+    history.currentPattern = pattern
+    
+    return finalPrediction
+end
+
+local function applyFinalSmoothing(prediction, history, pattern, timeToTarget, confidence)
+    local smoothing = 0.2
+    
+    if pattern == "strafing" then
+        smoothing = 0.15
+    elseif pattern == "fast_falling" or pattern == "clutching" then
+        smoothing = 0.1
+    elseif pattern == "stationary" then
+        smoothing = 0.05
+    end
+    
+    smoothing = smoothing * (1 - confidence)
+    
+    local microAdjust = Vector3.new(
+        (math.random() - 0.5) * 0.03,
+        (math.random() - 0.5) * 0.01,
+        (math.random() - 0.5) * 0.03
+    )
+    
+    return prediction + microAdjust
 end
 
 local function smoothAim(currentCFrame, targetPosition, smoothnessFactor, maxAngleChange, dt)
@@ -2987,6 +3090,14 @@ local function smoothAim(currentCFrame, targetPosition, smoothnessFactor, maxAng
     
     if angle < math.rad(0.5) then
         return CFrame.new(currentCFrame.Position, targetPosition)
+    end
+    
+    local elevationDifference = targetPosition.Y - currentCFrame.Position.Y
+    local horizontalDistance = (Vector3.new(targetPosition.X, 0, targetPosition.Z) - Vector3.new(currentCFrame.Position.X, 0, currentCFrame.Position.Z)).Magnitude
+    
+    if math.abs(elevationDifference) > 15 and horizontalDistance > 20 then
+        smoothnessFactor = math.min(smoothnessFactor * 1.5, 0.6)
+        maxAngleChange = math.max(maxAngleChange, math.rad(12))
     end
     
     local dynamicSmoothness = smoothnessFactor * math.min(angle * 2, 1.0)
@@ -3068,6 +3179,9 @@ local function enableProjectileAimbot()
                     playerGravity = 6
                 end
 
+                local elevationDifference = plr[ProjectileAimbotSettings.TargetPart].Position.Y - offsetpos.Y
+                local horizontalDistance = (Vector3.new(plr[ProjectileAimbotSettings.TargetPart].Position.X, 0, plr[ProjectileAimbotSettings.TargetPart].Position.Z) - Vector3.new(offsetpos.X, 0, offsetpos.Z)).Magnitude
+                
                 local rawLook = CFrame.new(offsetpos, plr[ProjectileAimbotSettings.TargetPart].Position)
                 
                 local predictedPosition
@@ -3081,10 +3195,57 @@ local function enableProjectileAimbot()
                     )
                 end)
 
+                if not predictedPosition then
+                    local timeToTarget = (plr[ProjectileAimbotSettings.TargetPart].Position - offsetpos).Magnitude / projSpeed
+                    local horizontalDistance = (Vector3.new(plr[ProjectileAimbotSettings.TargetPart].Position.X, 0, plr[ProjectileAimbotSettings.TargetPart].Position.Z) - Vector3.new(offsetpos.X, 0, offsetpos.Z)).Magnitude
+                    
+                    if horizontalDistance > 80 then
+                        predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
+                                        (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 1.1)
+                    elseif horizontalDistance < 20 then
+                        predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
+                                        (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.3)
+                    else
+                        predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
+                                        (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.7)
+                    end
+                end
+
+                local finalDistance = (predictedPosition - offsetpos).Magnitude
+                if finalDistance > 50 then
+                    local history = movementHistory[plr.Player.UserId]
+                    if history and history.positions and #history.positions >= 2 then
+                        local previousPos = history.positions[#history.positions - 1].pos
+                        local smoothing = math.min(finalDistance / 200, 0.7)
+                        predictedPosition = predictedPosition:Lerp(previousPos + (predictedPosition - previousPos) * 1.1, smoothing)
+                    end
+                end
+
                 if not predictionSuccess or not predictedPosition then
                     local timeToTarget = (plr[ProjectileAimbotSettings.TargetPart].Position - offsetpos).Magnitude / projSpeed
-                    predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
-                                       (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.4)
+                    
+                    local history = movementHistory[plr.Player.UserId] or {}
+                    local pattern = history.pattern or "unknown"
+                    
+                    local elevationFactor = math.clamp(elevationDifference / math.max(horizontalDistance, 1), -2, 2)
+                    
+                    if pattern == "falling_from_height" or pattern == "fast_falling" then
+                        predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
+                                           (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.3)
+                    elseif pattern == "jumping" then
+                        predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
+                                           (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.5) +
+                                           Vector3.new(0, math.max(2 + elevationFactor * 2, 0), 0)
+                    else
+                        predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
+                                           (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.4) +
+                                           Vector3.new(0, elevationFactor * 1.5, 0)
+                    end
+                end
+
+                if math.abs(elevationDifference) > 10 then
+                    local elevationAdjustment = elevationDifference * 0.1
+                    predictedPosition = predictedPosition + Vector3.new(0, elevationAdjustment, 0)
                 end
 
                 local newlook = smoothAim(rawLook, predictedPosition, 0.35, math.rad(6))
@@ -3117,7 +3278,16 @@ local function enableProjectileAimbot()
                     local finalDirection = (calc - newlook.p).Unit
                     local angleFromHorizontal = math.acos(math.clamp(finalDirection:Dot(Vector3.new(0, 1, 0)), -1, 1))
                     
-                    if angleFromHorizontal > math.rad(3) and angleFromHorizontal < math.rad(177) then
+                    local minAngle = math.rad(2)
+                    local maxAngle = math.rad(178)
+                    
+                    if elevationDifference > 15 then
+                        minAngle = math.rad(5) 
+                    elseif elevationDifference < -15 then
+                        maxAngle = math.rad(175)
+                    end
+                    
+                    if angleFromHorizontal > minAngle and angleFromHorizontal < maxAngle then
                         return {
                             initialVelocity = finalDirection * projSpeed,
                             positionFrom = offsetpos,
