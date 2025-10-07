@@ -2947,25 +2947,17 @@ local function calculateOptimizedPrediction(pattern, history, currentPos, curren
     end
     
     local gravityCompensation = 0
-    if horizontalDistance > 40 then
-        gravityCompensation = math.min(horizontalDistance * 0.02, 3)
+    if horizontalDistance > 20 then
+        gravityCompensation = math.min(horizontalDistance * 0.08, 12)
         
-        if elevationDifference < -8 then
-            gravityCompensation = gravityCompensation * 0.2
-        elseif elevationDifference > 8 then
-            gravityCompensation = gravityCompensation * 0.6
-        else
-            gravityCompensation = gravityCompensation * 0.4
+        if elevationDifference < -10 then
+            gravityCompensation = gravityCompensation * 0.5
+        elseif elevationDifference > 10 then
+            gravityCompensation = gravityCompensation * 1.3
         end
     end
     
     verticalPrediction = verticalPrediction + gravityCompensation
-    
-    local torsoOffset = 0
-    if pattern == "stationary" or pattern == "walking" or pattern == "strafing" or pattern == "sprinting" or pattern == "linear" then
-        torsoOffset = -2.5
-        verticalPrediction = verticalPrediction + torsoOffset
-    end
     
     local basePrediction = currentPos + horizontalPrediction + Vector3.new(0, verticalPrediction, 0)
     
