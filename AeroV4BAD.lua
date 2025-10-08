@@ -1032,26 +1032,22 @@ end
 
 local function hasSwordEquipped()
     if not store.inventory or not store.inventory.hotbar then 
-        debugPrint("hasSwordEquipped: No inventory or hotbar", "AUTO_HITBOX")
         return false 
     end
     
     local hotbarSlot = store.inventory.hotbarSlot
     if not hotbarSlot or not store.inventory.hotbar[hotbarSlot + 1] then 
-        debugPrint("hasSwordEquipped: No hotbar slot or item", "AUTO_HITBOX")
         return false 
     end
     
     local currentItem = store.inventory.hotbar[hotbarSlot + 1].item
     if not currentItem then 
-        debugPrint("hasSwordEquipped: No current item", "AUTO_HITBOX")
         return false 
     end
     
     local itemMeta = bedwars.ItemMeta[currentItem.itemType]
     local hasSword = itemMeta and itemMeta.sword ~= nil
     
-    debugPrint(string.format("hasSwordEquipped: %s (item: %s)", tostring(hasSword), currentItem.itemType), "AUTO_HITBOX")
     return hasSword
 end
 
@@ -1521,7 +1517,6 @@ local function enableKitESP()
     if kit then
         addKitESP(kit[1], kit[2])
         KitESPEnabled = true
-        debugPrint("KitESP enabled for kit: " .. store.equippedKit, "DEBUG")
     end
 end
 
@@ -1537,7 +1532,6 @@ local function disableKitESP()
     table.clear(KitESPReference)
     
     KitESPEnabled = false
-    debugPrint("KitESP disabled", "DEBUG")
 end
 
 local function recreateKitESP()
@@ -1810,8 +1804,6 @@ local NoSlowdownEnabled = false
 local oldSlowdown = nil
 
 local function createHitbox(ent)
-    debugPrint(string.format("createHitbox() called for entity: %s", ent.Player and ent.Player.Name or "NPC"), "HITBOX")
-    
     if ent.Targetable and ent.Player then
         local success = pcall(function()
             local hitbox = Instance.new('Part')
@@ -1828,12 +1820,7 @@ local function createHitbox(ent)
             weld.Parent = hitbox
             
             hitboxObjects[ent] = hitbox
-            debugPrint(string.format("Created hitbox for %s with size: %s", ent.Player.Name, tostring(hitbox.Size)), "HITBOX")
         end)
-        
-        if not success then
-            debugPrint(string.format("Failed to create hitbox for %s", ent.Player and ent.Player.Name or "unknown"), "HITBOX")
-        end
     end
 end
 
@@ -1841,18 +1828,15 @@ local function removeHitbox(ent)
     if hitboxObjects[ent] then
         hitboxObjects[ent]:Destroy()
         hitboxObjects[ent] = nil
-        debugPrint(string.format("Removed hitbox for %s", ent.Player and ent.Player.Name or "unknown"), "HITBOX")
     end
 end
 
 local function applySwordHitbox(enabled)
     if not bedwarsLoaded or not bedwars or not bedwars.SwordController then
-        debugPrint("applySwordHitbox() failed: bedwars not loaded or SwordController missing", "HITBOX")
         return false
     end
     
     if not bedwars.SwordController.swingSwordInRegion then
-        debugPrint("applySwordHitbox() failed: swingSwordInRegion function not found", "HITBOX")
         return false
     end
     
@@ -1860,17 +1844,11 @@ local function applySwordHitbox(enabled)
         if enabled then
             debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (Settings.HitBoxesExpandAmount / 3))
             hitboxSet = true
-            debugPrint(string.format("Applied sword hitbox with range: %.2f", Settings.HitBoxesExpandAmount / 3), "HITBOX")
         else
             debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
             hitboxSet = nil
-            debugPrint("Removed sword hitbox, restored to 3.8", "HITBOX")
         end
     end)
-    
-    if not success then
-        debugPrint("applySwordHitbox() failed to modify swingSwordInRegion: " .. tostring(errorMsg), "HITBOX")
-    end
     
     return success
 end
@@ -1879,24 +1857,19 @@ local function updatePlayerHitboxes()
     for ent, part in pairs(hitboxObjects) do
         if part and part.Parent then
             part.Size = Vector3.new(3, 6, 3) + Vector3.one * (Settings.HitBoxesExpandAmount / 5)
-            debugPrint(string.format("Updated hitbox size for %s: %s", ent.Player.Name, tostring(part.Size)), "HITBOX")
         end
     end
 end
 
 local function enableHitboxes()
-    debugPrint(string.format("enableHitboxes() called - Mode: %s, Expand: %.2f", Settings.HitBoxesMode, Settings.HitBoxesExpandAmount), "HITBOX")
-    
     if not entitylib.Running then
         entitylib.start()
-        debugPrint("Started entitylib for hitboxes", "HITBOX")
     end
     
     if Settings.HitBoxesMode == 'Sword' then
         local success = applySwordHitbox(true)
         if success then
             HitBoxesEnabled = true
-            debugPrint("Sword hitboxes enabled successfully", "HITBOX")
             if hasSwordEquipped() then
                 showNotification("HitBoxes", "HitBoxes enabled (Sword detected)", 2, "normal")
             else
@@ -1904,7 +1877,6 @@ local function enableHitboxes()
             end
             return true
         else
-            debugPrint("Failed to enable sword hitboxes", "HITBOX")
             return false
         end
     else 
@@ -1920,14 +1892,11 @@ local function enableHitboxes()
         end
         
         HitBoxesEnabled = true
-        debugPrint(string.format("Player hitboxes enabled successfully - Created %d hitboxes", #hitboxObjects), "HITBOX")
         return true
     end
 end
 
 local function disableHitboxes()
-    debugPrint("disableHitboxes() called", "HITBOX")
-    
     if Settings.HitBoxesMode == 'Sword' then
         if hitboxSet then
             applySwordHitbox(false)
@@ -1939,7 +1908,6 @@ local function disableHitboxes()
             end
         end
         table.clear(hitboxObjects)
-        debugPrint("Cleaned up all player hitboxes", "HITBOX")
     end
     
     for _, conn in pairs(hitboxConnections) do
@@ -1965,17 +1933,13 @@ local function setupAutoHitboxToggle()
         local hasSword = hasSwordEquipped()
         
         if hasSword ~= lastSwordState then
-            debugPrint(string.format("Sword state changed: %s -> %s", tostring(lastSwordState), tostring(hasSword)), "AUTO_HITBOX")
-            
             if hasSword then
                 if not HitBoxesEnabled then
-                    debugPrint("Auto enabling hitboxes (sword equipped)", "AUTO_HITBOX")
                     enableHitboxes()
                     showNotification("Auto HitBox", "HitBoxes auto-enabled (Sword equipped)", 2, "normal")
                 end
             else
                 if HitBoxesEnabled then
-                    debugPrint("Auto disabling hitboxes (no sword equipped)", "AUTO_HITBOX")
                     disableHitboxes()
                     showNotification("Auto HitBox", "HitBoxes auto-disabled (No sword)", 2, "normal")
                 end
@@ -1985,14 +1949,11 @@ local function setupAutoHitboxToggle()
     end)
     
     lastSwordState = hasSwordEquipped()
-    debugPrint(string.format("Initial sword state: %s", tostring(lastSwordState)), "AUTO_HITBOX")
     
     if lastSwordState and not HitBoxesEnabled then
-        debugPrint("Initial enable hitboxes (sword equipped)", "AUTO_HITBOX")
         enableHitboxes()
         showNotification("Auto HitBox", "HitBoxes auto-enabled (Sword equipped)", 2, "normal")
     elseif not lastSwordState and HitBoxesEnabled then
-        debugPrint("Initial disable hitboxes (no sword equipped)", "AUTO_HITBOX")
         disableHitboxes()
         showNotification("Auto HitBox", "HitBoxes auto-disabled (No sword)", 2, "normal")
     end
@@ -2001,7 +1962,6 @@ end
 local function enableAutoHitbox()
     if autoHitboxEnabled then return end
     autoHitboxEnabled = true
-    debugPrint("Auto hitbox toggle enabled", "AUTO_HITBOX")
     showNotification("Auto HitBox", "Auto HitBox system enabled", 2, "normal")
     setupAutoHitboxToggle()
 end
@@ -2013,7 +1973,6 @@ local function disableAutoHitbox()
         hitboxCheckConnection:Disconnect()
         hitboxCheckConnection = nil
     end
-    debugPrint("Auto hitbox toggle disabled", "HITBOX")
 end
 
 local function updateHitboxSettings()
@@ -2023,7 +1982,6 @@ local function updateHitboxSettings()
         elseif Settings.HitBoxesMode == 'Player' then
             updatePlayerHitboxes()
         end
-        debugPrint(string.format("Updated hitbox settings - Mode: %s, Expand: %.2f", Settings.HitBoxesMode, Settings.HitBoxesExpandAmount), "HITBOX")
     end
 end
 
@@ -2111,35 +2069,23 @@ local function switchHotbarItem(block)
 end
 
 local function enableVelocity()
-    debugPrint("enableVelocity() called", "DEBUG")
-    
     if not bedwarsLoaded then
-        debugPrint("enableVelocity() failed: bedwarsLoaded is false", "ERROR")
         return false
     end
     
     if not bedwars.KnockbackUtil then
-        debugPrint("enableVelocity() failed: bedwars.KnockbackUtil not found", "ERROR")
         return false
     end
-    
-    debugPrint("enableVelocity() prerequisites met, attempting to hook", "DEBUG")
     
     local success = pcall(function()
         if not velocityOld then
             velocityOld = bedwars.KnockbackUtil.applyKnockback
-            debugPrint("enableVelocity() stored original applyKnockback function", "DEBUG")
         end
         
         bedwars.KnockbackUtil.applyKnockback = function(root, mass, dir, knockback, ...)
-            debugPrint(string.format("Knockback applied! Chance: %d%%, Horizontal: %d%%, Vertical: %d%%", 
-                Velocity.Chance.Value, Velocity.Horizontal.Value, Velocity.Vertical.Value), "VELOCITY")
-            
             local chanceRoll = rand:NextNumber(0, 100)
-            debugPrint(string.format("Chance roll: %.2f vs %d", chanceRoll, Velocity.Chance.Value), "VELOCITY")
             
             if chanceRoll > Velocity.Chance.Value then 
-                debugPrint("Chance roll failed, applying normal knockback", "VELOCITY")
                 return velocityOld(root, mass, dir, knockback, ...)
             end
             
@@ -2148,9 +2094,6 @@ local function enableVelocity()
                 Part = 'RootPart',
                 Players = true
             })
-            
-            debugPrint(string.format("Target check enabled: %s, Check result: %s", 
-                tostring(Velocity.TargetCheck.Enabled), tostring(check ~= nil)), "VELOCITY")
 
             if check then
                 knockback = knockback or {}
@@ -2158,64 +2101,39 @@ local function enableVelocity()
                 local originalV = knockback.vertical or 1
                 
                 if Velocity.Horizontal.Value == 0 and Velocity.Vertical.Value == 0 then 
-                    debugPrint("Both horizontal and vertical are 0, blocking knockback completely", "VELOCITY")
                     return 
                 end
                 
                 knockback.horizontal = originalH * (Velocity.Horizontal.Value / 100)
                 knockback.vertical = originalV * (Velocity.Vertical.Value / 100)
-                
-                debugPrint(string.format("Modified knockback - H: %.2f -> %.2f, V: %.2f -> %.2f", 
-                    originalH, knockback.horizontal, originalV, knockback.vertical), "VELOCITY")
-            else
-                debugPrint("Target check failed, applying normal knockback", "VELOCITY")
             end
             
             return velocityOld(root, mass, dir, knockback, ...)
         end
         
         Velocity.Enabled = true
-        debugPrint("enableVelocity() hook applied successfully", "DEBUG")
     end)
-    
-    if success then
-        debugPrint("enableVelocity() completed successfully", "SUCCESS")
-    else
-        debugPrint("enableVelocity() failed with error", "ERROR")
-    end
     
     return success
 end
 
 local function disableVelocity()
-    debugPrint("disableVelocity() called", "DEBUG")
-    
     if not bedwarsLoaded then
-        debugPrint("disableVelocity() failed: bedwarsLoaded is false", "ERROR")
         return false
     end
     
     if not bedwars.KnockbackUtil then
-        debugPrint("disableVelocity() failed: bedwars.KnockbackUtil not found", "ERROR")
         return false
     end
     
     if not velocityOld then
-        debugPrint("disableVelocity() failed: velocityOld not stored", "ERROR")
         return false
     end
     
     local success = pcall(function()
         bedwars.KnockbackUtil.applyKnockback = velocityOld
         Velocity.Enabled = false
-        debugPrint("disableVelocity() restored original function", "DEBUG")
     end)
-    
-    if success then
-        debugPrint("disableVelocity() completed successfully", "SUCCESS")
-    else
-        debugPrint("disableVelocity() failed with error", "ERROR")
-    end
     
     return success
 end
@@ -2262,8 +2180,6 @@ local fastBreakLoop = nil
 local function enableFastBreak()
     if FastBreakEnabled or not bedwarsLoaded then return false end
     
-    debugPrint("enableFastBreak() called", "DEBUG")
-    
     local success = pcall(function()
         if bedwars.BlockBreakController and bedwars.BlockBreakController.blockBreaker then
             FastBreakEnabled = true
@@ -2276,25 +2192,16 @@ local function enableFastBreak()
                     task.wait(0.1)
                 end
             end)
-            
-            debugPrint("FastBreak enabled successfully with speed: " .. tostring(Settings.FastBreakSpeed), "SUCCESS")
         else
-            debugPrint("BlockBreakController or blockBreaker not found", "ERROR")
             return false
         end
     end)
-    
-    if not success then
-        debugPrint("enableFastBreak() failed", "ERROR")
-    end
     
     return success
 end
 
 local function disableFastBreak()
     if not FastBreakEnabled then return false end
-    
-    debugPrint("disableFastBreak() called", "DEBUG")
     
     FastBreakEnabled = false
     
@@ -2306,13 +2213,8 @@ local function disableFastBreak()
     local success = pcall(function()
         if bedwars.BlockBreakController and bedwars.BlockBreakController.blockBreaker and bedwars.BlockBreakController.blockBreaker.setCooldown then
             bedwars.BlockBreakController.blockBreaker:setCooldown(0.3)
-            debugPrint("FastBreak disabled successfully, restored to 0.3", "SUCCESS")
         end
     end)
-    
-    if not success then
-        debugPrint("disableFastBreak() failed", "ERROR")
-    end
     
     return success
 end
@@ -2364,8 +2266,6 @@ end
 local function enableAimAssist()
     if AimAssistEnabled or not bedwarsLoaded then return false end
     
-    debugPrint("enableAimAssist() called", "DEBUG")
-    
     local success = pcall(function()
         AimAssistEnabled = true
         
@@ -2373,18 +2273,15 @@ local function enableAimAssist()
             if not entitylib.isAlive then return end
             
             if store and store.hand and store.hand.toolType == 'block' then
-                debugPrint("AimAssist: Holding blocks, aim assist disabled", "AIMASSIST")
                 return
             end
             
             if not (store and store.hand and store.hand.toolType == 'sword') then
-                debugPrint("AimAssist: Not holding sword", "AIMASSIST")
                 return
             end
             
             if Settings.AimAssistFirstPersonCheck then
                 if not isFirstPerson() then 
-                    debugPrint("AimAssist: Not in first person", "AIMASSIST")
                     return 
                 end
             end
@@ -2392,7 +2289,6 @@ local function enableAimAssist()
             if Settings.AimAssistShopCheck then
                 local isShop = lplr:FindFirstChild("PlayerGui") and lplr:FindFirstChild("PlayerGui"):FindFirstChild("ItemShop") or nil
                 if isShop then 
-                    debugPrint("AimAssist: In shop, aim assist disabled", "AIMASSIST")
                     return 
                 end
             end
@@ -2400,7 +2296,6 @@ local function enableAimAssist()
             if Settings.AimAssistClickAim then
                 local timeSinceLastSwing = tick() - (bedwars.SwordController.lastSwing or 0)
                 if timeSinceLastSwing > 0.4 then 
-                    debugPrint("AimAssist: Click aim condition not met", "AIMASSIST")
                     return 
                 end
             end
@@ -2449,49 +2344,34 @@ local function enableAimAssist()
             end
             
             if target then
-                debugPrint(string.format("AimAssist: Target acquired - %s", target.Player and target.Player.Name or "NPC"), "AIMASSIST")
-                
                 local delta = (target.RootPart.Position - entitylib.character.RootPart.Position)
                 local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
                 local angle = math.acos(localfacing:Dot((delta * Vector3.new(1, 0, 1)).Unit))
                 
                 if angle >= (math.rad(Settings.AimAssistMaxAngle) / 2) then 
-                    debugPrint("AimAssist: Angle too large", "AIMASSIST")
                     return 
                 end
                 
                 local aimSpeed = Settings.AimAssistAimSpeed
                 if Settings.AimAssistStrafeIncrease and (mainInputService:IsKeyDown(Enum.KeyCode.A) or mainInputService:IsKeyDown(Enum.KeyCode.D)) then
                     aimSpeed = aimSpeed + 10
-                    debugPrint("AimAssist: Strafe increase applied", "AIMASSIST")
                 end
                 
                 gameCamera.CFrame = gameCamera.CFrame:Lerp(
                     CFrame.lookAt(gameCamera.CFrame.p, target.RootPart.Position), 
                     aimSpeed * dt
                 )
-                debugPrint("AimAssist: Aiming at target", "AIMASSIST")
-            else
-                debugPrint("AimAssist: No valid target found", "AIMASSIST")
             end
             
             table.clear(targetsList)
         end)
-        
-        debugPrint("AimAssist enabled successfully", "SUCCESS")
     end)
-    
-    if not success then
-        debugPrint("enableAimAssist() failed", "ERROR")
-    end
     
     return success
 end
 
 local function disableAimAssist()
     if not AimAssistEnabled then return false end
-    
-    debugPrint("disableAimAssist() called", "DEBUG")
     
     AimAssistEnabled = false
     
@@ -2500,7 +2380,6 @@ local function disableAimAssist()
         aimAssistConnection = nil
     end
     
-    debugPrint("AimAssist disabled successfully", "SUCCESS")
     return true
 end
 
@@ -2570,8 +2449,6 @@ end
 local function disableAutoClicker()
     if not AutoClickerEnabled then return false end
     
-    debugPrint("disableAutoClicker() called", "DEBUG")
-    
     AutoClickerEnabled = false
     
     if autoClickerThread then
@@ -2584,14 +2461,11 @@ local function disableAutoClicker()
     end
     autoClickerConnections = {}
     
-    debugPrint("AutoClicker disabled successfully", "SUCCESS")
     return true
 end
 
 local function enableNoFall()
     if NoFallEnabled or not bedwarsLoaded then return false end
-    
-    debugPrint("enableNoFall() called with mode: " .. Settings.NoFallMode, "DEBUG")
     
     local success = pcall(function()
         if not groundHit then
@@ -2604,7 +2478,6 @@ local function enableNoFall()
                             local remoteResult = bedwars.Client:Get(remotes.GroundHit or "GroundHit")
                             if remoteResult and remoteResult.instance then
                                 groundHit = remoteResult.instance
-                                debugPrint("GroundHit remote found via bedwars.Client:Get", "SUCCESS")
                             end
                         end
                     end)
@@ -2612,15 +2485,11 @@ local function enableNoFall()
                         pcall(function()
                             if knit and knit.Controllers and knit.Controllers.FallDamageController then
                                 groundHit = knit.Controllers.FallDamageController.KnitStart
-                                debugPrint("GroundHit remote found via FallDamageController", "SUCCESS")
                             end
                         end)
                     end
                     if groundHit then break end
                     task.wait(0.1)
-                end
-                if not groundHit then
-                    debugPrint("GroundHit remote not found after " .. attempts .. " attempts", "ERROR")
                 end
             end)
         end
@@ -2660,7 +2529,6 @@ local function enableNoFall()
                         if tracked < -85 then
                             if Settings.NoFallMode == 'Packet' and groundHit then
                                 groundHit:FireServer(nil, Vector3.new(0, tracked, 0), workspace:GetServerTimeNow())
-                                debugPrint("NoFall packet sent with velocity: " .. tostring(tracked), "DEBUG")
                             else
                                 rayParams.FilterDescendantsInstances = {lplr.Character, gameCamera}
                                 rayParams.CollisionGroup = root.CollisionGroup
@@ -2670,14 +2538,12 @@ local function enableNoFall()
                                     local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, -1000, 0), rayParams)
                                     if ray then
                                         root.CFrame -= Vector3.new(0, root.Position.Y - (ray.Position.Y + rootSize), 0)
-                                        debugPrint("NoFall teleported to ground", "DEBUG")
                                     end
                                 else 
                                     local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, (tracked * 0.1) - rootSize, 0), rayParams)
                                     if ray then
                                         tracked = 0
                                         root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -80, root.AssemblyLinearVelocity.Z)
-                                        debugPrint("NoFall bounced player", "DEBUG")
                                     end
                                 end
                             end
@@ -2691,20 +2557,13 @@ local function enableNoFall()
         end
         
         NoFallEnabled = true
-        debugPrint("NoFall enabled successfully with mode: " .. Settings.NoFallMode, "SUCCESS")
     end)
-    
-    if not success then
-        debugPrint("enableNoFall() failed", "ERROR")
-    end
     
     return success
 end
 
 local function disableNoFall()
     if not NoFallEnabled then return false end
-    
-    debugPrint("disableNoFall() called", "DEBUG")
     
     NoFallEnabled = false
     
@@ -2713,14 +2572,11 @@ local function disableNoFall()
     end
     noFallConnections = {}
     
-    debugPrint("NoFall disabled successfully", "SUCCESS")
     return true
 end
 
 local function enableNoSlowdown()
     if NoSlowdownEnabled or not bedwarsLoaded then return false end
-    
-    debugPrint("enableNoSlowdown() called", "DEBUG")
     
     local success = pcall(function()
         if bedwars.SprintController then
@@ -2741,28 +2597,19 @@ local function enableNoSlowdown()
                 end
                 
                 NoSlowdownEnabled = true
-                debugPrint("NoSlowdown enabled successfully", "SUCCESS")
             else
-                debugPrint("Movement status modifier not found", "ERROR")
                 return false
             end
         else
-            debugPrint("SprintController not found", "ERROR")
             return false
         end
     end)
-    
-    if not success then
-        debugPrint("enableNoSlowdown() failed", "ERROR")
-    end
     
     return success
 end
 
 local function disableNoSlowdown()
     if not NoSlowdownEnabled or not bedwarsLoaded then return false end
-    
-    debugPrint("disableNoSlowdown() called", "DEBUG")
     
     local success = pcall(function()
         if bedwars.SprintController and oldSlowdown then
@@ -2771,14 +2618,9 @@ local function disableNoSlowdown()
                 modifier.addModifier = oldSlowdown
                 oldSlowdown = nil
                 NoSlowdownEnabled = false
-                debugPrint("NoSlowdown disabled successfully", "SUCCESS")
             end
         end
     end)
-    
-    if not success then
-        debugPrint("disableNoSlowdown() failed", "ERROR")
-    end
     
     return success
 end
@@ -3312,32 +3154,6 @@ local function disableProjectileAimbot()
             ProjectileAimbotEnabled = false
         end
     end)
-    
-    return success
-end
-
-local function disableProjectileAimbot()
-    if not ProjectileAimbotEnabled or not bedwarsLoaded or not bedwars.ProjectileController then 
-        debugPrint("disableProjectileAimbot() failed: prerequisites not met", "ERROR")
-        return false 
-    end
-
-    debugPrint("disableProjectileAimbot() called", "DEBUG")
-    
-    local success = pcall(function()
-        if oldCalculateImportantLaunchValues then
-            bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
-            oldCalculateImportantLaunchValues = nil
-            ProjectileAimbotEnabled = false
-            debugPrint("Projectile aimbot disabled successfully", "SUCCESS")
-        else
-            debugPrint("No original function stored to restore", "ERROR")
-        end
-    end)
-    
-    if not success then
-        debugPrint("disableProjectileAimbot() failed", "ERROR")
-    end
     
     return success
 end
