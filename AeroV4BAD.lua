@@ -2641,6 +2641,7 @@ local function analyzeMovementPattern(history, currentPos, currentVel, currentTi
     local speedVariance = 0
     local totalHorizontal = Vector3.zero
     local verticalHistory = {}
+    local accelerationHistory = {}
     
     for i = 2, #history.velocities do
         local prevVel = history.velocities[i-1].vel
@@ -2658,6 +2659,13 @@ local function analyzeMovementPattern(history, currentPos, currentVel, currentTi
         end
         
         table.insert(verticalHistory, currVel.Y)
+        
+        if i > 2 then
+            local prevPrevVel = history.velocities[i-2].vel
+            local verticalAccel = currVel.Y - prevVel.Y
+            table.insert(accelerationHistory, verticalAccel)
+        end
+        
         speedVariance = speedVariance + math.abs(prevVel.Magnitude - currVel.Magnitude)
         totalHorizontal = totalHorizontal + currHorizontal
     end
@@ -2668,13 +2676,34 @@ local function analyzeMovementPattern(history, currentPos, currentVel, currentTi
     for _, vy in ipairs(verticalHistory) do
         avgVertical = avgVertical + vy
     end
-    avgVertical = avgVertical / #verticalHistory
+    avgVertical = avgVertical / math.max(#verticalHistory, 1)
     
-    local isJumping = currentVel.Y > 5 and avgVertical > 2
-    local isPeakJump = currentVel.Y > -2 and currentVel.Y < 5 and #verticalHistory >= 3 and verticalHistory[#verticalHistory-2] > 8
-    local isFallingFromJump = currentVel.Y < -5 and avgVertical < -2 and math.abs(currentVel.Y) < 25
-    local isFastFalling = currentVel.Y < -25
-    local isClutching = currentVel.Y < -10 and horizontalSpeed < 3
+    local avgAcceleration = 0
+    if #accelerationHistory > 0 then
+        for _, accel in ipairs(accelerationHistory) do
+            avgAcceleration = avgAcceleration + accel
+        end
+        avgAcceleration = avgAcceleration / #accelerationHistory
+    end
+    
+    local peakDetected = false
+    if #verticalHistory >= 3 then
+        local recent = verticalHistory[#verticalHistory]
+        local previous = verticalHistory[#verticalHistory - 1]
+        local beforePrevious = verticalHistory[#verticalHistory - 2]
+        
+        if beforePrevious > 3 and previous > -3 and previous < 3 and recent < 0 then
+            peakDetected = true
+        end
+    end
+    
+    local isJumping = currentVel.Y > 7 and avgVertical > 1.5
+    local isRisingJump = currentVel.Y > 10 and avgAcceleration > -16
+    local isPeakJump = (currentVel.Y > -3.5 and currentVel.Y < 5.5 and peakDetected) or (math.abs(currentVel.Y) < 2.2 and avgVertical > -0.3)
+    local isFallingFromJump = currentVel.Y < -6 and currentVel.Y > -45 and avgVertical < -5
+    local isFastFalling = currentVel.Y < -38 and avgVertical < -28
+    local isVoidFalling = currentVel.Y < -60
+    local isClutching = currentVel.Y < -12 and horizontalSpeed < 5
     
     local isStrafing = directionChanges >= 2 and horizontalSpeed > 5
     local isSprinting = horizontalSpeed > 10 and directionChanges <= 1
@@ -2684,21 +2713,31 @@ local function analyzeMovementPattern(history, currentPos, currentVel, currentTi
     local timeSinceStrafeChange = currentTime - history.lastStrafeChange
     
     local confidence = 0.7
-    if isStrafing then
-        confidence = 0.65 + (math.min(timeSinceStrafeChange / 1.5, 1.0) * 0.25)
+    if isVoidFalling then
+        confidence = 0.90
+    elseif isFastFalling then
+        confidence = 0.85
+    elseif isRisingJump then
+        confidence = 0.75
+    elseif isPeakJump then
+        confidence = 0.88
+    elseif isFallingFromJump then
+        confidence = 0.82
+    elseif isStrafing then
+        confidence = 0.65 + (math.min(timeSinceStrafeChange / 1.5, 1.0) * 0.20)
     elseif isStationary then
         confidence = 0.95
     elseif isSprinting then
         confidence = 0.85
-    elseif isFastFalling then
-        confidence = 0.8
     elseif isClutching then
-        confidence = 0.6
+        confidence = 0.65
     end
     
     local pattern = "linear"
     
-    if isFastFalling then
+    if isVoidFalling then
+        pattern = "void_falling"
+    elseif isFastFalling then
         pattern = "fast_falling"
     elseif isClutching then
         pattern = "clutching"
@@ -2706,6 +2745,8 @@ local function analyzeMovementPattern(history, currentPos, currentVel, currentTi
         pattern = "falling_from_jump"
     elseif isPeakJump then
         pattern = "peak_jump"
+    elseif isRisingJump then
+        pattern = "rising_jump"
     elseif isJumping then
         pattern = "jumping"
     elseif isStrafing then 
@@ -2720,6 +2761,7 @@ local function analyzeMovementPattern(history, currentPos, currentVel, currentTi
     
     history.lastVerticalState = pattern
     history.verticalVelocity = currentVel.Y
+    history.verticalAcceleration = avgAcceleration
     
     return {pattern = pattern, confidence = confidence}
 end
@@ -2732,70 +2774,139 @@ local function calculateOptimizedPrediction(pattern, history, currentPos, curren
     local elevationDifference = currentPos.Y - origin.Y
     local horizontalDistance = (Vector3.new(currentPos.X, 0, currentPos.Z) - Vector3.new(origin.X, 0, origin.Z)).Magnitude
     
+    local distanceCategory = "close"
+    if horizontalDistance > 70 then
+        distanceCategory = "far"
+    elseif horizontalDistance > 35 then
+        distanceCategory = "mid"
+    end
+    
     local horizontalPrediction = Vector3.zero
     local verticalPrediction = 0
     
     if pattern == "strafing" then
         local timeSinceChange = currentTime - history.lastStrafeChange
-        local strafeDuration = 0.5 + (math.random() * 0.4)
+        local strafeDuration = 0.6 + (math.random() * 0.3)
         
-        if timeSinceChange < strafeDuration * 0.3 then
-            horizontalPrediction = horizontalVel * timeToTarget * 0.7
-        elseif timeSinceChange > strafeDuration * 0.7 then
+        if timeSinceChange < strafeDuration * 0.25 then
+            horizontalPrediction = horizontalVel * timeToTarget * 0.65
+        elseif timeSinceChange > strafeDuration * 0.75 then
             local currentDirection = horizontalVel.Unit
             local predictedDirection = -currentDirection
-            if history.directionBias.Magnitude > 0.2 then
+            if history.directionBias.Magnitude > 0.15 then
                 predictedDirection = history.directionBias.Unit
             end
-            horizontalPrediction = predictedDirection * horizontalSpeed * timeToTarget * 0.8
+            horizontalPrediction = predictedDirection * horizontalSpeed * timeToTarget * 0.75
         else
-            horizontalPrediction = horizontalVel * timeToTarget * 0.4
+            horizontalPrediction = horizontalVel * timeToTarget * 0.45
         end
         
     elseif pattern == "sprinting" then
-        horizontalPrediction = horizontalVel * timeToTarget * 0.6
+        if distanceCategory == "far" then
+            horizontalPrediction = horizontalVel * timeToTarget * 0.65
+        elseif distanceCategory == "mid" then
+            horizontalPrediction = horizontalVel * timeToTarget * 0.52
+        else
+            horizontalPrediction = horizontalVel * timeToTarget * 0.42
+        end
         
     elseif pattern == "walking" then
-        horizontalPrediction = horizontalVel * timeToTarget * 0.3
+        horizontalPrediction = horizontalVel * timeToTarget * 0.25
         
     elseif pattern == "stationary" then
         horizontalPrediction = Vector3.zero
         
     else
-        horizontalPrediction = horizontalVel * timeToTarget * 0.4
+        horizontalPrediction = horizontalVel * timeToTarget * 0.35
     end
     
-    if pattern == "jumping" then
-        local jumpStrength = math.min(verticalVel / 20, 0.8) 
-        verticalPrediction = verticalVel * timeToTarget * 0.15 * jumpStrength 
-        
-    elseif pattern == "peak_jump" then
-        verticalPrediction = verticalVel * timeToTarget * 0.05 
-        
-    elseif pattern == "falling_from_jump" then
-        local fallTime = math.min(timeToTarget, 0.6) 
-        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * 0.1) 
+    if pattern == "void_falling" then
+        local fallTime = math.min(timeToTarget, 1.2)
+        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * 0.28)
+        horizontalPrediction = horizontalPrediction * 0.38
         
     elseif pattern == "fast_falling" then
-        local fallTime = math.min(timeToTarget, 0.8) 
-        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * 0.15) 
+        local fallTime = math.min(timeToTarget, 1.0)
+        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * 0.24)
+        horizontalPrediction = horizontalPrediction * 0.52
+        
+    elseif pattern == "falling_from_jump" then
+        local fallTime = math.min(timeToTarget, 0.85)
+        local gravityEffect = 0.18
+        
+        if distanceCategory == "far" then
+            gravityEffect = 0.24
+            fallTime = math.min(timeToTarget, 1.05)
+        elseif distanceCategory == "mid" then
+            gravityEffect = 0.21
+            fallTime = math.min(timeToTarget, 0.95)
+        end
+        
+        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * gravityEffect)
+        
+    elseif pattern == "peak_jump" then
+        verticalPrediction = -4 * timeToTarget
+        if distanceCategory == "far" then
+            verticalPrediction = verticalPrediction * 1.35
+        elseif distanceCategory == "mid" then
+            verticalPrediction = verticalPrediction * 1.2
+        end
+        
+    elseif pattern == "rising_jump" then
+        local jumpTime = math.min(timeToTarget, 0.65)
+        verticalPrediction = verticalVel * jumpTime * 0.28
+        
+        if distanceCategory == "far" then
+            verticalPrediction = verticalPrediction * 1.45
+        elseif distanceCategory == "mid" then
+            verticalPrediction = verticalPrediction * 1.25
+        end
+        
+    elseif pattern == "jumping" then
+        local jumpStrength = math.min(math.abs(verticalVel) / 22, 1.0)
+        local jumpTime = math.min(timeToTarget, 0.65)
+        verticalPrediction = verticalVel * jumpTime * 0.22 * jumpStrength
+        
+        if distanceCategory == "far" then
+            verticalPrediction = verticalPrediction * 1.35
+        elseif distanceCategory == "mid" then
+            verticalPrediction = verticalPrediction * 1.18
+        end
         
     elseif pattern == "clutching" then
-        verticalPrediction = verticalVel * timeToTarget * 0.05 
-        horizontalPrediction = horizontalPrediction * 0.2
+        verticalPrediction = verticalVel * timeToTarget * 0.12
+        horizontalPrediction = horizontalPrediction * 0.22
         
     else
-        verticalPrediction = verticalVel * timeToTarget * 0.1 
+        verticalPrediction = verticalVel * timeToTarget * 0.18
     end
     
     local gravityCompensation = 0
-    if horizontalDistance > 25 then 
-        gravityCompensation = math.min(horizontalDistance * 0.04, 8) 
+    if horizontalDistance > 18 then
+        local baseComp = horizontalDistance * 0.038
         
-        if elevationDifference < -15 then 
-            gravityCompensation = gravityCompensation * 0.7 
-        elseif elevationDifference > 15 then 
-            gravityCompensation = gravityCompensation * 1.15 
+        if distanceCategory == "far" then
+            baseComp = baseComp * 1.35
+        elseif distanceCategory == "mid" then
+            baseComp = baseComp * 1.18
+        end
+        
+        gravityCompensation = math.min(baseComp, 12)
+        
+        if elevationDifference < -25 then
+            gravityCompensation = gravityCompensation * 0.55
+        elseif elevationDifference < -12 then
+            gravityCompensation = gravityCompensation * 0.72
+        elseif elevationDifference > 25 then
+            gravityCompensation = gravityCompensation * 1.28
+        elseif elevationDifference > 12 then
+            gravityCompensation = gravityCompensation * 1.15
+        end
+        
+        if pattern == "void_falling" or pattern == "fast_falling" then
+            gravityCompensation = gravityCompensation * 0.85
+        elseif pattern == "rising_jump" then
+            gravityCompensation = gravityCompensation * 1.12
         end
     end
     
@@ -2803,12 +2914,38 @@ local function calculateOptimizedPrediction(pattern, history, currentPos, curren
     
     local basePrediction = currentPos + horizontalPrediction + Vector3.new(0, verticalPrediction, 0)
     
-    local downwardAdjustment = Vector3.new(0, -1.5, 0) 
-    basePrediction = basePrediction + downwardAdjustment
+    local downwardAdjustment = -1.2
+    if distanceCategory == "far" then
+        downwardAdjustment = -0.82
+    elseif distanceCategory == "mid" then
+        downwardAdjustment = -1.05
+    end
+
+    if pattern == "void_falling" or pattern == "fast_falling" then
+        downwardAdjustment = downwardAdjustment * 0.68
+    elseif pattern == "falling_from_jump" then
+        downwardAdjustment = downwardAdjustment * 0.75
+    elseif pattern == "rising_jump" or pattern == "jumping" then
+        downwardAdjustment = downwardAdjustment * 0.58
+    elseif pattern == "peak_jump" then
+        downwardAdjustment = downwardAdjustment * 0.45
+    end
+
+    basePrediction = basePrediction + Vector3.new(0, downwardAdjustment, 0)
     
-    if horizontalDistance > 50 then
-        local leadMultiplier = math.min(horizontalDistance / 100, 1.5)
-        basePrediction = basePrediction + (horizontalVel * timeToTarget * 0.1 * leadMultiplier)
+    if horizontalDistance > 40 then
+        local leadMultiplier = math.min(horizontalDistance / 80, 1.8)
+        local additionalLead = horizontalVel * timeToTarget * 0.18 * leadMultiplier
+        basePrediction = basePrediction + additionalLead
+    end
+    
+    if history.predictionConfidence and history.predictionConfidence > 0.8 then
+        local microAdjust = Vector3.new(
+            (math.random() - 0.5) * 0.8,
+            (math.random() - 0.5) * 0.4,
+            (math.random() - 0.5) * 0.8
+        )
+        basePrediction = basePrediction + microAdjust
     end
     
     return basePrediction
@@ -2834,7 +2971,9 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
             lastStrafeChange = 0,
             directionBias = Vector3.zero,
             lastVerticalState = "unknown",
-            verticalVelocity = 0
+            verticalVelocity = 0,
+            jumpHistory = {},
+            fallHistory = {}
         }
     end
     
@@ -2845,29 +2984,64 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
     table.insert(history.velocities, {vel = currentVel, time = currentTime})
     table.insert(history.timestamps, currentTime)
     
-    while #history.timestamps > 0 and currentTime - history.timestamps[1] > 2.0 do
+    if currentVel.Y > 15 then
+        table.insert(history.jumpHistory, {time = currentTime, velocity = currentVel.Y, type = "rising"})
+    elseif currentVel.Y < -25 then
+        table.insert(history.fallHistory, {time = currentTime, velocity = currentVel.Y, type = "fast_fall"})
+    elseif currentVel.Y < -15 then
+        table.insert(history.fallHistory, {time = currentTime, velocity = currentVel.Y, type = "falling"})
+    end
+    
+    while #history.timestamps > 0 and currentTime - history.timestamps[1] > 3.0 do
         table.remove(history.positions, 1)
         table.remove(history.velocities, 1)
         table.remove(history.timestamps, 1)
     end
     
+    for i = #history.jumpHistory, 1, -1 do
+        if currentTime - history.jumpHistory[i].time > 5.0 then
+            table.remove(history.jumpHistory, i)
+        end
+    end
+    for i = #history.fallHistory, 1, -1 do
+        if currentTime - history.fallHistory[i].time > 5.0 then
+            table.remove(history.fallHistory, i)
+        end
+    end
+    
     local distance = (currentPos - origin).Magnitude
     local baseTimeToTarget = distance / projSpeed
-    
-    local timeToTarget = baseTimeToTarget
     
     local movementAnalysis = analyzeMovementPattern(history, currentPos, currentVel, currentTime)
     local pattern = movementAnalysis.pattern
     local confidence = movementAnalysis.confidence
     
-    if pattern == "strafing" then
-        timeToTarget = baseTimeToTarget * 0.8
+    local timeToTarget = baseTimeToTarget
+    
+    if pattern == "void_falling" then
+        timeToTarget = baseTimeToTarget * 1.25
     elseif pattern == "fast_falling" then
-        timeToTarget = baseTimeToTarget * 1.1
+        timeToTarget = baseTimeToTarget * 1.15
+    elseif pattern == "falling_from_jump" then
+        timeToTarget = baseTimeToTarget * 1.08
+    elseif pattern == "rising_jump" then
+        timeToTarget = baseTimeToTarget * 0.95
+    elseif pattern == "peak_jump" then
+        timeToTarget = baseTimeToTarget * 1.05
+    elseif pattern == "strafing" then
+        timeToTarget = baseTimeToTarget * 0.85
     elseif pattern == "clutching" then
-        timeToTarget = baseTimeToTarget * 0.6
+        timeToTarget = baseTimeToTarget * 0.75
     else
-        timeToTarget = baseTimeToTarget * 0.9
+        timeToTarget = baseTimeToTarget * 0.95
+    end
+    
+    if distance > 80 then
+        timeToTarget = timeToTarget * 1.12
+    elseif distance > 45 then
+        timeToTarget = timeToTarget * 1.06
+    elseif distance < 15 then
+        timeToTarget = timeToTarget * 0.88
     end
     
     local predictedPosition = calculateOptimizedPrediction(
@@ -2882,9 +3056,11 @@ local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, grav
     )
     
     local finalPrediction = predictedPosition
-    if confidence < 0.8 then
-        local blend = 0.3 * (1 - confidence)
+    if confidence < 0.7 then
+        local blend = 0.4 * (1 - confidence)
         finalPrediction = finalPrediction:Lerp(currentPos, blend)
+    elseif confidence > 0.9 then
+        finalPrediction = finalPrediction + (currentVel * 0.016 * 2)
     end
     
     history.predictionConfidence = confidence
@@ -2932,9 +3108,27 @@ local function smoothAim(currentCFrame, targetPosition, smoothnessFactor, maxAng
     local elevationDifference = targetPosition.Y - currentCFrame.Position.Y
     local horizontalDistance = (Vector3.new(targetPosition.X, 0, targetPosition.Z) - Vector3.new(currentCFrame.Position.X, 0, currentCFrame.Position.Z)).Magnitude
     
-    if math.abs(elevationDifference) > 15 and horizontalDistance > 20 then
-        smoothnessFactor = math.min(smoothnessFactor * 1.5, 0.6)
+    local distanceCategory = "close"
+    if horizontalDistance > 50 then
+        distanceCategory = "far"
+    elseif horizontalDistance > 25 then
+        distanceCategory = "mid"
+    end
+    
+    if distanceCategory == "far" then
+        smoothnessFactor = math.min(smoothnessFactor * 2.0, 0.7)
+        maxAngleChange = math.max(maxAngleChange, math.rad(15))
+    elseif distanceCategory == "mid" then
+        smoothnessFactor = math.min(smoothnessFactor * 1.6, 0.65)
         maxAngleChange = math.max(maxAngleChange, math.rad(12))
+    end
+    
+    if math.abs(elevationDifference) > 20 then
+        smoothnessFactor = math.min(smoothnessFactor * 1.8, 0.75)
+        maxAngleChange = math.max(maxAngleChange, math.rad(18))
+    elseif math.abs(elevationDifference) > 10 then
+        smoothnessFactor = math.min(smoothnessFactor * 1.4, 0.68)
+        maxAngleChange = math.max(maxAngleChange, math.rad(14))
     end
     
     local dynamicSmoothness = smoothnessFactor * math.min(angle * 2, 1.0)
@@ -3062,35 +3256,161 @@ local function enableProjectileAimbot()
                     local timeToTarget = (plr[ProjectileAimbotSettings.TargetPart].Position - offsetpos).Magnitude / projSpeed
                     
                     local history = movementHistory[plr.Player.UserId] or {}
-                    local pattern = history.pattern or "unknown"
+                    local pattern = history.currentPattern or history.pattern or "unknown"
                     
-                    local elevationFactor = math.clamp(elevationDifference / math.max(horizontalDistance, 1), -1.5, 1.5) 
-                    
-                    if pattern == "falling_from_height" or pattern == "fast_falling" then
-                        predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
-                                        (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.3) +
-                                        Vector3.new(0, elevationFactor * 0.8, 0) 
-                    elseif pattern == "jumping" then
-                        predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
-                                        (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.5) +
-                                        Vector3.new(0, math.max(1 + elevationFactor * 1.2, -0.5), 0) 
-                    else
-                        predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
-                                        (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.4) +
-                                        Vector3.new(0, elevationFactor * 1.0, 0) 
+                    local distanceCategory = "close"
+                    if horizontalDistance > 50 then
+                        distanceCategory = "far"
+                    elseif horizontalDistance > 25 then
+                        distanceCategory = "mid"
                     end
                     
-                    local downwardAdjustment = Vector3.new(0, -1.2, 0) 
-                    predictedPosition = predictedPosition + downwardAdjustment
+                    local elevationFactor = math.clamp(elevationDifference / math.max(horizontalDistance, 1), -2.0, 2.0)
+                    
+                    local velocityMultiplier = 0.38
+                    local verticalAdjustment = elevationFactor * 0.75
+
+                    if pattern == "void_falling" then
+                        velocityMultiplier = 0.28
+                        verticalAdjustment = elevationFactor * 0.52
+                        if distanceCategory == "far" then
+                            velocityMultiplier = 0.38
+                            verticalAdjustment = elevationFactor * 0.65
+                        end
+                        
+                    elseif pattern == "fast_falling" or pattern == "falling_from_height" then
+                        velocityMultiplier = 0.30
+                        verticalAdjustment = elevationFactor * 0.58
+                        if distanceCategory == "far" then
+                            velocityMultiplier = 0.42
+                            verticalAdjustment = elevationFactor * 0.72
+                        elseif distanceCategory == "mid" then
+                            velocityMultiplier = 0.36
+                            verticalAdjustment = elevationFactor * 0.65
+                        end
+                        
+                    elseif pattern == "falling_from_jump" then
+                        velocityMultiplier = 0.33
+                        verticalAdjustment = elevationFactor * 0.65
+                        if distanceCategory == "far" then
+                            velocityMultiplier = 0.45
+                            verticalAdjustment = elevationFactor * 0.82
+                        elseif distanceCategory == "mid" then
+                            velocityMultiplier = 0.39
+                            verticalAdjustment = elevationFactor * 0.73
+                        end
+                        
+                    elseif pattern == "peak_jump" then
+                        velocityMultiplier = 0.40
+                        verticalAdjustment = math.max(0.45 + elevationFactor * 0.8, -0.25)
+                        if distanceCategory == "far" then
+                            velocityMultiplier = 0.52
+                            verticalAdjustment = math.max(0.85 + elevationFactor * 1.05, -0.18)
+                        elseif distanceCategory == "mid" then
+                            velocityMultiplier = 0.46
+                            verticalAdjustment = math.max(0.65 + elevationFactor * 0.92, -0.22)
+                        end
+                        
+                    elseif pattern == "rising_jump" or pattern == "jumping" then
+                        velocityMultiplier = 0.43
+                        verticalAdjustment = math.max(0.85 + elevationFactor * 1.1, -0.32)
+                        if distanceCategory == "far" then
+                            velocityMultiplier = 0.56
+                            verticalAdjustment = math.max(1.35 + elevationFactor * 1.35, -0.25)
+                        elseif distanceCategory == "mid" then
+                            velocityMultiplier = 0.49
+                            verticalAdjustment = math.max(1.10 + elevationFactor * 1.22, -0.28)
+                        end
+                        
+                    elseif pattern == "clutching" then
+                        velocityMultiplier = 0.20
+                        verticalAdjustment = elevationFactor * 0.45
+                        
+                    else
+                        if distanceCategory == "far" then
+                            velocityMultiplier = 0.48
+                            verticalAdjustment = elevationFactor * 0.88
+                        elseif distanceCategory == "mid" then
+                            velocityMultiplier = 0.43
+                            verticalAdjustment = elevationFactor * 0.80
+                        end
+                    end
+                    
+                    predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
+                                        (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * velocityMultiplier) +
+                                        Vector3.new(0, verticalAdjustment, 0)
+                    
+                    local downwardAdjustment = -0.75
+                    if distanceCategory == "far" then
+                        downwardAdjustment = -0.42
+                        if pattern == "falling_from_jump" or pattern == "fast_falling" or pattern == "void_falling" then
+                            downwardAdjustment = -0.30
+                        end
+                        if pattern == "rising_jump" or pattern == "jumping" then
+                            downwardAdjustment = -0.22
+                        end
+                    elseif distanceCategory == "mid" then
+                        downwardAdjustment = -0.58
+                        if pattern == "falling_from_jump" or pattern == "fast_falling" then
+                            downwardAdjustment = -0.45
+                        end
+                        if pattern == "rising_jump" or pattern == "jumping" then
+                            downwardAdjustment = -0.35
+                        end
+                    else
+                        if pattern == "falling_from_jump" or pattern == "fast_falling" then
+                            downwardAdjustment = -0.62
+                        end
+                        if pattern == "rising_jump" or pattern == "jumping" then
+                            downwardAdjustment = -0.48
+                        end
+                    end
+
+                    predictedPosition = predictedPosition + Vector3.new(0, downwardAdjustment, 0)
                 end
 
                 if math.abs(elevationDifference) > 15 then
-                    local elevationAdjustment = elevationDifference * 0.06 
+                    local elevationAdjustment = elevationDifference * 0.048
+                    
+                    if horizontalDistance > 50 then
+                        elevationAdjustment = elevationDifference * 0.062
+                    elseif horizontalDistance > 25 then
+                        elevationAdjustment = elevationDifference * 0.055
+                    end
+                    
                     predictedPosition = predictedPosition + Vector3.new(0, elevationAdjustment, 0)
                 end
 
-                local newlook = smoothAim(rawLook, predictedPosition, 0.35, math.rad(6))
-                
+                local smoothnessValue = 0.35
+                local maxAngleValue = math.rad(6)
+
+                local distanceCategory = "close"
+                if horizontalDistance > 50 then
+                    distanceCategory = "far"
+                    smoothnessValue = 0.50
+                    maxAngleValue = math.rad(10)
+                elseif horizontalDistance > 25 then
+                    distanceCategory = "mid"
+                    smoothnessValue = 0.42
+                    maxAngleValue = math.rad(8)
+                end
+
+                local history = movementHistory[plr.Player.UserId] or {}
+                local currentPattern = history.currentPattern or "unknown"
+
+                if currentPattern == "void_falling" or currentPattern == "fast_falling" then
+                    smoothnessValue = smoothnessValue * 1.3
+                    maxAngleValue = maxAngleValue * 1.4
+                elseif currentPattern == "falling_from_jump" then
+                    smoothnessValue = smoothnessValue * 1.2
+                    maxAngleValue = maxAngleValue * 1.3
+                elseif currentPattern == "rising_jump" or currentPattern == "jumping" then
+                    smoothnessValue = smoothnessValue * 1.15
+                    maxAngleValue = maxAngleValue * 1.2
+                end
+
+                local newlook = smoothAim(rawLook, predictedPosition, smoothnessValue, maxAngleValue)
+
                 if projmeta.projectile ~= 'owl_projectile' then
                     newlook = newlook * CFrame.new(
                         bedwars.BowConstantsTable.RelX or 0,
@@ -3112,7 +3432,7 @@ local function enableProjectileAimbot()
                     plr.Jumping and 50 or nil,
                     rayCheck
                 )
-                
+
                 if calc then
                     local patternData = movementHistory[plr.Player.UserId] or {}
                     
@@ -3122,10 +3442,23 @@ local function enableProjectileAimbot()
                     local minAngle = math.rad(2)
                     local maxAngle = math.rad(178)
                     
-                    if elevationDifference > 15 then
-                        minAngle = math.rad(5) 
-                    elseif elevationDifference < -15 then
-                        maxAngle = math.rad(175)
+                    if elevationDifference > 20 then
+                        minAngle = math.rad(6)
+                        maxAngle = math.rad(176)
+                    elseif elevationDifference > 10 then
+                        minAngle = math.rad(4)
+                        maxAngle = math.rad(177)
+                    elseif elevationDifference < -20 then
+                        minAngle = math.rad(3)
+                        maxAngle = math.rad(172)
+                    elseif elevationDifference < -10 then
+                        minAngle = math.rad(2)
+                        maxAngle = math.rad(174)
+                    end
+                    
+                    if distanceCategory == "far" then
+                        minAngle = math.max(minAngle - math.rad(2), math.rad(1))
+                        maxAngle = math.min(maxAngle + math.rad(2), math.rad(179))
                     end
                     
                     if angleFromHorizontal > minAngle and angleFromHorizontal < maxAngle then
