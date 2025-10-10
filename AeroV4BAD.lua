@@ -636,9 +636,9 @@ local Settings = {
     UninjectKeybind = "RightAlt",
     VelocityChance = 100,
     VelocityEnabled = true,
-    VelocityHorizontal = 63,
+    VelocityHorizontal = 73,
     VelocityTargetCheck = false,
-    VelocityVertical = 63,
+    VelocityVertical = 73,
 }
 
 pcall(function()
@@ -2766,42 +2766,45 @@ local function calculateOptimizedPrediction(pattern, history, currentPos, curren
     end
     
     if pattern == "jumping" then
-        local jumpStrength = math.min(verticalVel / 15, 1.0)
-        verticalPrediction = verticalVel * timeToTarget * 0.3 * jumpStrength
+        local jumpStrength = math.min(verticalVel / 20, 0.8) 
+        verticalPrediction = verticalVel * timeToTarget * 0.15 * jumpStrength 
         
     elseif pattern == "peak_jump" then
-        verticalPrediction = verticalVel * timeToTarget * 0.1
+        verticalPrediction = verticalVel * timeToTarget * 0.05 
         
     elseif pattern == "falling_from_jump" then
-        local fallTime = math.min(timeToTarget, 0.8)
-        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * 0.2)
+        local fallTime = math.min(timeToTarget, 0.6) 
+        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * 0.1) 
         
     elseif pattern == "fast_falling" then
-        local fallTime = math.min(timeToTarget, 1.2)
-        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * 0.3)
+        local fallTime = math.min(timeToTarget, 0.8) 
+        verticalPrediction = verticalVel * fallTime + (0.5 * workspace.Gravity * fallTime * fallTime * 0.15) 
         
     elseif pattern == "clutching" then
-        verticalPrediction = verticalVel * timeToTarget * 0.1
+        verticalPrediction = verticalVel * timeToTarget * 0.05 
         horizontalPrediction = horizontalPrediction * 0.2
         
     else
-        verticalPrediction = verticalVel * timeToTarget * 0.2
+        verticalPrediction = verticalVel * timeToTarget * 0.1 
     end
     
     local gravityCompensation = 0
-    if horizontalDistance > 20 then
-        gravityCompensation = math.min(horizontalDistance * 0.08, 12)
+    if horizontalDistance > 25 then 
+        gravityCompensation = math.min(horizontalDistance * 0.04, 8) 
         
-        if elevationDifference < -10 then
-            gravityCompensation = gravityCompensation * 0.5
-        elseif elevationDifference > 10 then
-            gravityCompensation = gravityCompensation * 1.3
+        if elevationDifference < -15 then 
+            gravityCompensation = gravityCompensation * 0.7 
+        elseif elevationDifference > 15 then 
+            gravityCompensation = gravityCompensation * 1.15 
         end
     end
     
     verticalPrediction = verticalPrediction + gravityCompensation
     
     local basePrediction = currentPos + horizontalPrediction + Vector3.new(0, verticalPrediction, 0)
+    
+    local downwardAdjustment = Vector3.new(0, -1.5, 0) 
+    basePrediction = basePrediction + downwardAdjustment
     
     if horizontalDistance > 50 then
         local leadMultiplier = math.min(horizontalDistance / 100, 1.5)
@@ -3061,24 +3064,28 @@ local function enableProjectileAimbot()
                     local history = movementHistory[plr.Player.UserId] or {}
                     local pattern = history.pattern or "unknown"
                     
-                    local elevationFactor = math.clamp(elevationDifference / math.max(horizontalDistance, 1), -2, 2)
+                    local elevationFactor = math.clamp(elevationDifference / math.max(horizontalDistance, 1), -1.5, 1.5) 
                     
                     if pattern == "falling_from_height" or pattern == "fast_falling" then
                         predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
-                                           (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.3)
+                                        (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.3) +
+                                        Vector3.new(0, elevationFactor * 0.8, 0) 
                     elseif pattern == "jumping" then
                         predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
-                                           (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.5) +
-                                           Vector3.new(0, math.max(2 + elevationFactor * 2, 0), 0)
+                                        (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.5) +
+                                        Vector3.new(0, math.max(1 + elevationFactor * 1.2, -0.5), 0) 
                     else
                         predictedPosition = plr[ProjectileAimbotSettings.TargetPart].Position + 
-                                           (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.4) +
-                                           Vector3.new(0, elevationFactor * 1.5, 0)
+                                        (plr[ProjectileAimbotSettings.TargetPart].Velocity * timeToTarget * 0.4) +
+                                        Vector3.new(0, elevationFactor * 1.0, 0) 
                     end
+                    
+                    local downwardAdjustment = Vector3.new(0, -1.2, 0) 
+                    predictedPosition = predictedPosition + downwardAdjustment
                 end
 
-                if math.abs(elevationDifference) > 10 then
-                    local elevationAdjustment = elevationDifference * 0.1
+                if math.abs(elevationDifference) > 15 then
+                    local elevationAdjustment = elevationDifference * 0.06 
                     predictedPosition = predictedPosition + Vector3.new(0, elevationAdjustment, 0)
                 end
 
