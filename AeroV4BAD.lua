@@ -580,12 +580,12 @@ repeat task.wait() until game:IsLoaded()
 
 -- Settings (you can change these values)
 local Settings = {
-    AimAssistAimSpeed = 1,
-    AimAssistClickAim = false,
-    AimAssistDistance = 30,
+    AimAssistAimSpeed = 2.6,
+    AimAssistClickAim = true,
+    AimAssistDistance = 25,
     AimAssistEnabled = true,
     AimAssistFirstPersonCheck = true,
-    AimAssistMaxAngle = 170,
+    AimAssistMaxAngle = 240,
     AimAssistShopCheck = true,
     AimAssistStrafeIncrease = false,
     AimAssistTargetMode = "Distance",
@@ -607,7 +607,7 @@ local Settings = {
     HitBoxesDisableKeybind = "X",
     HitBoxesEnableKeybind = "Z",
     HitBoxesEnabled = true,
-    HitBoxesExpandAmount = 85,
+    HitBoxesExpandAmount = 38,
     HitBoxesMode = "Player", -- "Sword" or "Player"
     HitFixEnabled = true,
     InstantPPEnabled = false,
@@ -632,9 +632,9 @@ local Settings = {
     UninjectKeybind = "RightAlt",
     VelocityChance = 100,
     VelocityEnabled = true,
-    VelocityHorizontal = 73,
+    VelocityHorizontal = 78,
     VelocityTargetCheck = false,
-    VelocityVertical = 73,
+    VelocityVertical = 78,
 }
 
 pcall(function()
@@ -1645,7 +1645,7 @@ local function hookClientGet()
 end
 
 local originalReachDistance = nil
-local REACH_DISTANCE = 18
+local REACH_DISTANCE = 17
 local remotes = {}
 
 local function setupHitFix()
@@ -2108,6 +2108,7 @@ local function enableVelocity()
         end
         
         Velocity.Enabled = true
+        debugPrint("Velocity enabled", "VELOCITY")
     end)
     
     return success
@@ -2122,13 +2123,15 @@ local function disableVelocity()
         return false
     end
     
-    if not velocityOld then
-        return false
-    end
-    
     local success = pcall(function()
-        bedwars.KnockbackUtil.applyKnockback = velocityOld
-        Velocity.Enabled = false
+        if velocityOld then
+            bedwars.KnockbackUtil.applyKnockback = velocityOld
+            velocityOld = nil
+            Velocity.Enabled = false
+            debugPrint("Velocity disabled and restored to original", "VELOCITY")
+        else
+            debugPrint("Velocity: No original function found to restore", "VELOCITY")
+        end
     end)
     
     return success
@@ -3033,6 +3036,8 @@ end
 
 
 local function enableAllFeatures()
+    debugPrint("Enabling all features", "FEATURES")
+    
     ProjectileAimbotSettings.FOV = Settings.ProjectileAimbotFOV
     ProjectileAimbotSettings.TargetPart = Settings.ProjectileAimbotTargetPart
     ProjectileAimbotSettings.OtherProjectiles = Settings.ProjectileAimbotOtherProjectiles
@@ -3087,10 +3092,12 @@ local function enableAllFeatures()
         enableStaffDetector()
     end
     allFeaturesEnabled = true
+    debugPrint("All features enabled", "FEATURES")
 end
 
 local function disableAllFeatures()
-    debugPrint("disableAllFeatures() called", "DEBUG")
+    debugPrint("Disabling all features", "FEATURES")
+    
     disableKitESP()
     disableProjectileAimbot()
     disableInstantPP()
@@ -3111,7 +3118,10 @@ local function disableAllFeatures()
     disableAimAssist()
     disableAutoClicker()
     disableStaffDetector()
+    
     allFeaturesEnabled = false
+    debugPrint("All features disabled", "FEATURES")
+    
     task.spawn(function()
         showNotification("Script Status", "Script disabled. Press RightShift to re-enable.", 3, "normal")
     end)
@@ -3167,6 +3177,10 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
         end
 
     elseif input.KeyCode == Enum.KeyCode[Settings.UninjectKeybind] then
+        debugPrint("Uninject key pressed - Running full cleanup", "UNINJECT")
+        
+        disableAllFeatures()
+        
         if getgenv().VapeScriptInstances then
             for _, cleanup in pairs(getgenv().VapeScriptInstances) do
                 pcall(cleanup)
@@ -3184,6 +3198,8 @@ local mainInputConnection = UserInputService.InputBegan:Connect(function(input, 
 
         pcall(function() entitylib.kill() end)
         pcall(function() script:Destroy() end)
+        
+        debugPrint("Script fully uninjected", "UNINJECT")
     end
 end)
 
@@ -3219,15 +3235,17 @@ task.spawn(function()
 end)
 
 addCleanupFunction(function()
+    debugPrint("Running full cleanup", "CLEANUP")
+    
     if NotificationGui and NotificationGui.Parent then
         NotificationGui:Destroy()
     end
     table.clear(staffNotifs)
-    disableAutoClicker()
+    
     disableAllFeatures()
-    disableStaffDetector()
-    disableAutoHitbox() 
+    
     table.clear(movementHistory)
+    
     pcall(function()
         if originalFunctions then
             for funcName, original in pairs(originalFunctions) do
@@ -3235,23 +3253,29 @@ addCleanupFunction(function()
                     swordController[funcName] = original
                 end
             end
+            table.clear(originalFunctions)
         end
         if oldCalculateImportantLaunchValues and bedwars and bedwars.ProjectileController then
             pcall(function()
                 bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
+                oldCalculateImportantLaunchValues = nil
             end)
         end
         if originalReachDistance ~= nil and bedwars and bedwars.CombatConstant then
             bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = originalReachDistance
+            originalReachDistance = nil
         end
         if OldGet and bedwars.Client then
             bedwars.Client.Get = OldGet
+            OldGet = nil
         end
         if oldHitBlock and bedwars.BlockBreaker then
             bedwars.BlockBreaker.hitBlock = oldHitBlock
+            oldHitBlock = nil
         end
         if velocityOld and bedwars.KnockbackUtil then
             bedwars.KnockbackUtil.applyKnockback = velocityOld
+            velocityOld = nil
         end
         if FastBreakEnabled then
             disableFastBreak()
@@ -3285,10 +3309,42 @@ addCleanupFunction(function()
         table.clear(hitboxObjects)
         if hitboxSet then
             applySwordHitbox(false)
+            hitboxSet = nil
         end
         for _, conn in pairs(hitboxConnections) do
             pcall(function() conn:Disconnect() end)
         end
         table.clear(hitboxConnections)
+        
+        if sprintConnection then
+            sprintConnection:Disconnect()
+            sprintConnection = nil
+        end
+        if hitboxCheckConnection then
+            hitboxCheckConnection:Disconnect()
+            hitboxCheckConnection = nil
+        end
+        for _, conn in pairs(autoToolConnections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        table.clear(autoToolConnections)
+        for _, conn in pairs(autoClickerConnections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        table.clear(autoClickerConnections)
+        for _, conn in pairs(kitESPConnections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        table.clear(kitESPConnections)
+        for _, conn in pairs(StaffDetector.connections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        table.clear(StaffDetector.connections)
+        if InstantPPConnection then
+            InstantPPConnection:Disconnect()
+            InstantPPConnection = nil
+        end
     end)
+    
+    debugPrint("Full cleanup completed", "CLEANUP")
 end)
