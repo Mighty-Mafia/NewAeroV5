@@ -2935,7 +2935,27 @@ run(function()
 						end
 	
 						local newlook = CFrame.new(offsetpos, plr[TargetPart.Value].Position) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
-						local calc = prediction.SolveTrajectory(newlook.p, projSpeed, gravity, plr[TargetPart.Value].Position, projmeta.projectile == 'telepearl' and Vector3.zero or plr[TargetPart.Value].Velocity, playerGravity, plr.HipHeight, plr.Jumping and 42.6 or nil, rayCheck)
+						
+						local predictedPosition = prediction.predictStrafingMovement(
+							plr.Player, 
+							plr[TargetPart.Value], 
+							projSpeed, 
+							gravity,
+							newlook.p
+						)
+
+						local calc = prediction.SolveTrajectory(
+							newlook.p, 
+							projSpeed, 
+							gravity, 
+							predictedPosition, 
+							projmeta.projectile == 'telepearl' and Vector3.zero or plr[TargetPart.Value].Velocity, 
+							playerGravity, 
+							plr.HipHeight, 
+							plr.Jumping and 50 or nil, 
+							rayCheck
+						)
+						
 						if calc then
 							targetinfo.Targets[plr] = tick() + 1
 							return {
@@ -2956,20 +2976,24 @@ run(function()
 		end,
 		Tooltip = 'Silently adjusts your aim towards the enemy'
 	})
+	
 	Targets = ProjectileAimbot:CreateTargets({
 		Players = true,
 		Walls = true
 	})
+	
 	TargetPart = ProjectileAimbot:CreateDropdown({
 		Name = 'Part',
 		List = {'RootPart', 'Head'}
 	})
+	
 	FOV = ProjectileAimbot:CreateSlider({
 		Name = 'FOV',
 		Min = 1,
 		Max = 1000,
 		Default = 1000
 	})
+	
 	OtherProjectiles = ProjectileAimbot:CreateToggle({
 		Name = 'Other Projectiles',
 		Default = true
