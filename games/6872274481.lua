@@ -1,8 +1,3 @@
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -16,14 +11,6 @@ local vapeEvents = setmetatable({}, {
 	end
 })
 
-local function errorNotification(title, message, duration)
-    if shared.vape then
-        shared.vape:CreateNotification(title, message, duration, 'alert')
-    else
-        warn("Notification: [" .. title .. "] " .. message)
-    end
-end
-
 local playersService = cloneref(game:GetService('Players'))
 local replicatedStorage = cloneref(game:GetService('ReplicatedStorage'))
 local runService = cloneref(game:GetService('RunService'))
@@ -36,7 +23,6 @@ local contextActionService = cloneref(game:GetService('ContextActionService'))
 local guiService = cloneref(game:GetService('GuiService'))
 local coreGui = cloneref(game:GetService('CoreGui'))
 local starterGui = cloneref(game:GetService('StarterGui'))
-
 
 local isnetworkowner = identifyexecutor and table.find({'AWP', 'Nihon'}, ({identifyexecutor()})[1]) and isnetworkowner or function()
 	return true
@@ -680,7 +666,7 @@ run(function()
 		AnimationType = require(replicatedStorage.TS.animation['animation-type']).AnimationType,
 		AnimationUtil = require(replicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out['shared'].util['animation-util']).AnimationUtil,
 		AppController = require(replicatedStorage['rbxts_include']['node_modules']['@easy-games']['game-core'].out.client.controllers['app-controller']).AppController,
-		BedBreakEffectMeta = require(replicatedStorage.TS.locker['break-bed-effect']['break-bed-effect-meta']).BreakBedEffectMeta,
+		BedBreakEffectMeta = require(replicatedStorage.TS.locker['bed-break-effect']['bed-break-effect-meta']).BedBreakEffectMeta,
 		BedwarsKitMeta = require(replicatedStorage.TS.games.bedwars.kit['bedwars-kit-meta']).BedwarsKitMeta,
 		BlockBreaker = Knit.Controllers.BlockBreakController.blockBreaker,
 		BlockController = require(replicatedStorage['rbxts_include']['node_modules']['@easy-games']['block-engine'].out).BlockEngine,
@@ -1295,47 +1281,6 @@ run(function()
 		Name = 'Use killaura target'
 	})
 	StrafeIncrease = AimAssist:CreateToggle({Name = 'Strafe increase'})
-end)
-
-run(function()
-	local old 
-	local AutoChargeTime 
-
-	AutoCharge = vape.Categories.Combat:CreateModule({
-	    Name = 'AutoCharge',
-	    Function = function(callback)
-	        if callback then
-	            local chargeSwingTime = 0 
-
-	            old = bedwars.SwordController.sendServerRequest
-	            bedwars.SwordController.sendServerRequest = function(self, ...)
-
-	                if (os.clock() - chargeSwingTime) < AutoChargeTime.Value then 
-	                    return 
-	                end
-
-	                self.lastSwingServerTimeDelta = AutoChargeTime.Value 
-	                chargeSwingTime = os.clock()
-
-	                return old(self, ...)
-	            end
-	        else
-	            if old then
-	                bedwars.SwordController.sendServerRequest = old
-	                old = nil
-	            end
-	        end
-	    end,
-	    Tooltip = 'Allows you to get charged hits while spam clicking.'
-	})
-
-    AutoChargeTime = AutoCharge:CreateSlider({
-        Name = 'Charge Time',
-        Min = 0,
-        Max = 0.5,
-        Default = 0.4,
-        Decimal = 100 
-    })
 end)
 	
 run(function()
@@ -2774,6 +2719,119 @@ run(function()
 end)
 	
 run(function()
+	local NoFall
+	local Mode
+	local rayParams = RaycastParams.new()
+	local groundHit
+	task.spawn(function()
+		groundHit = bedwars.Client:Get(remotes.GroundHit).instance
+	end)
+	
+	NoFall = vape.Categories.Blatant:CreateModule({
+		Name = 'NoFall',
+		Function = function(callback)
+			if callback then
+				local tracked = 0
+				if Mode.Value == 'Gravity' then
+					local extraGravity = 0
+					NoFall:Clean(runService.PreSimulation:Connect(function(dt)
+						if entitylib.isAlive then
+							local root = entitylib.character.RootPart
+							if root.AssemblyLinearVelocity.Y < -85 then
+								rayParams.FilterDescendantsInstances = {lplr.Character, gameCamera}
+								rayParams.CollisionGroup = root.CollisionGroup
+	
+								local rootSize = root.Size.Y / 2 + entitylib.character.HipHeight
+								local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, (tracked * 0.1) - rootSize, 0), rayParams)
+								if not ray then
+									root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -86, root.AssemblyLinearVelocity.Z)
+									root.CFrame += Vector3.new(0, extraGravity * dt, 0)
+									extraGravity += -workspace.Gravity * dt
+								end
+							else
+								extraGravity = 0
+							end
+						end
+					end))
+				else
+					repeat
+						if entitylib.isAlive then
+							local root = entitylib.character.RootPart
+							tracked = entitylib.character.Humanoid.FloorMaterial == Enum.Material.Air and math.min(tracked, root.AssemblyLinearVelocity.Y) or 0
+	
+							if tracked < -85 then
+								if Mode.Value == 'Packet' then
+									groundHit:FireServer(nil, Vector3.new(0, tracked, 0), workspace:GetServerTimeNow())
+								else
+									rayParams.FilterDescendantsInstances = {lplr.Character, gameCamera}
+									rayParams.CollisionGroup = root.CollisionGroup
+	
+									local rootSize = root.Size.Y / 2 + entitylib.character.HipHeight
+									if Mode.Value == 'Teleport' then
+										local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, -1000, 0), rayParams)
+										if ray then
+											root.CFrame -= Vector3.new(0, root.Position.Y - (ray.Position.Y + rootSize), 0)
+										end
+									else
+										local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, (tracked * 0.1) - rootSize, 0), rayParams)
+										if ray then
+											tracked = 0
+											root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -80, root.AssemblyLinearVelocity.Z)
+										end
+									end
+								end
+							end
+						end
+	
+						task.wait(0.03)
+					until not NoFall.Enabled
+				end
+			end
+		end,
+		Tooltip = 'Prevents taking fall damage.'
+	})
+	Mode = NoFall:CreateDropdown({
+		Name = 'Mode',
+		List = {'Packet', 'Gravity', 'Teleport', 'Bounce'},
+		Function = function()
+			if NoFall.Enabled then
+				NoFall:Toggle()
+				NoFall:Toggle()
+			end
+		end
+	})
+end)
+
+run(function()
+    local PromptButtonHoldBegan = nil
+    local ProximityPromptService = cloneref(game:GetService('ProximityPromptService'))
+
+    local InstantPP = vape.Categories.Utility:CreateModule({
+        Name = 'InstantPP',
+        Function = function(callback)
+            if callback then
+                if fireproximityprompt then
+                    PromptButtonHoldBegan = ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
+                        fireproximityprompt(prompt)
+                    end)
+
+                    InstantPP:Clean(PromptButtonHoldBegan)
+                else
+                    errorNotification('InstantPP', 'Your exploit does not support this command (missing fireproximityprompt)', 5)
+                    InstantPP:Toggle()
+                end
+            else
+                if PromptButtonHoldBegan ~= nil then
+                    PromptButtonHoldBegan:Disconnect()
+                    PromptButtonHoldBegan = nil
+                end
+            end
+        end,
+        Tooltip = 'Instantly activates proximity prompts.'
+    })
+end)
+	
+run(function()
 	local old
 	
 	vape.Categories.Blatant:CreateModule({
@@ -2904,60 +2962,7 @@ run(function()
 		Default = true
 	})
 end)
-
-run(function()
-    local AutoChargeBow = {Enabled = false}
-    local old
-    
-    AutoChargeBow = vape.Categories.Utility:CreateModule({
-        Name = 'AutoChargeBow',
-        Function = function(callback)
-            if callback then
-                old = bedwars.ProjectileController.calculateImportantLaunchValues
-                bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
-                    local self, projmeta, worldmeta, origin, shootpos = ...
-                    
-                    if projmeta.projectile:find('arrow') then
-                        local pos = shootpos or self:getLaunchPosition(origin)
-                        if not pos then
-                            return old(...)
-                        end
-                        
-                        local meta = projmeta:getProjectileMeta()
-                        local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
-                        local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
-                        local projSpeed = (meta.launchVelocity or 100)
-                        local offsetpos = pos + (projmeta.projectile == 'owl_projectile' and Vector3.zero or projmeta.fromPositionOffset)
-                        
-                        local camera = workspace.CurrentCamera
-                        local mouse = lplr:GetMouse()
-                        local unitRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
-                        
-                        local targetPoint = unitRay.Origin + (unitRay.Direction * 1000)
-                        local aimDirection = (targetPoint - offsetpos).Unit
-                        
-                        local newlook = CFrame.new(offsetpos, targetPoint) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
-                        local finalDirection = (targetPoint - newlook.Position).Unit
-                        
-                        return {
-                            initialVelocity = finalDirection * projSpeed,
-                            positionFrom = offsetpos,
-                            deltaT = lifetime,
-                            gravitationalAcceleration = gravity,
-                            drawDurationSeconds = 5
-                        }
-                    end
-                    
-                    return old(...)
-                end
-            else
-                bedwars.ProjectileController.calculateImportantLaunchValues = old
-            end
-        end,
-        Tooltip = 'Automatically charges your bow to full power with trajectory line preview'
-    })
-end)
-
+	
 run(function()
 	local ProjectileAura
 	local Targets
@@ -3071,6 +3076,59 @@ run(function()
 			return val == 1 and 'stud' or 'studs'
 		end
 	})
+end)
+
+run(function()
+    local AutoChargeBow = {Enabled = false}
+    local old
+    
+    AutoChargeBow = vape.Categories.Utility:CreateModule({
+        Name = 'AutoChargeBow',
+        Function = function(callback)
+            if callback then
+                old = bedwars.ProjectileController.calculateImportantLaunchValues
+                bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
+                    local self, projmeta, worldmeta, origin, shootpos = ...
+                    
+                    if projmeta.projectile:find('arrow') then
+                        local pos = shootpos or self:getLaunchPosition(origin)
+                        if not pos then
+                            return old(...)
+                        end
+                        
+                        local meta = projmeta:getProjectileMeta()
+                        local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
+                        local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
+                        local projSpeed = (meta.launchVelocity or 100)
+                        local offsetpos = pos + (projmeta.projectile == 'owl_projectile' and Vector3.zero or projmeta.fromPositionOffset)
+                        
+                        local camera = workspace.CurrentCamera
+                        local mouse = lplr:GetMouse()
+                        local unitRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
+                        
+                        local targetPoint = unitRay.Origin + (unitRay.Direction * 1000)
+                        local aimDirection = (targetPoint - offsetpos).Unit
+                        
+                        local newlook = CFrame.new(offsetpos, targetPoint) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
+                        local finalDirection = (targetPoint - newlook.Position).Unit
+                        
+                        return {
+                            initialVelocity = finalDirection * projSpeed,
+                            positionFrom = offsetpos,
+                            deltaT = lifetime,
+                            gravitationalAcceleration = gravity,
+                            drawDurationSeconds = 5
+                        }
+                    end
+                    
+                    return old(...)
+                end
+            else
+                bedwars.ProjectileController.calculateImportantLaunchValues = old
+            end
+        end,
+        Tooltip = 'Automatically charges your bow to full power with trajectory line preview'
+    })
 end)
 	
 run(function()
@@ -4469,6 +4527,54 @@ run(function()
 end)
 	
 run(function()
+	local shooting, old = false
+	
+	local function getCrossbows()
+		local crossbows = {}
+		for i, v in store.inventory.hotbar do
+			if v.item and v.item.itemType:find('crossbow') and i ~= (store.inventory.hotbarSlot + 1) then table.insert(crossbows, i - 1) end
+		end
+		return crossbows
+	end
+	
+	vape.Categories.Utility:CreateModule({
+		Name = 'AutoShoot',
+		Function = function(callback)
+			if callback then
+				old = bedwars.ProjectileController.createLocalProjectile
+				bedwars.ProjectileController.createLocalProjectile = function(...)
+					local source, data, proj = ...
+					if source and (proj == 'arrow' or proj == 'fireball') and not shooting then
+						task.spawn(function()
+							local bows = getCrossbows()
+							if #bows > 0 then
+								shooting = true
+								task.wait(0.15)
+								local selected = store.inventory.hotbarSlot
+								for _, v in getCrossbows() do
+									if hotbarSwitch(v) then
+										task.wait(0.05)
+										mouse1click()
+										task.wait(0.05)
+									end
+								end
+								hotbarSwitch(selected)
+								shooting = false
+							end
+						end)
+					end
+					return old(...)
+				end
+			else
+				bedwars.ProjectileController.createLocalProjectile = old
+			end
+		end,
+		Tooltip = 'Automatically crossbow macro\'s'
+	})
+	
+end)
+	
+run(function()
 	local AutoToxic
 	local GG
 	local Toggles, Lists, said, dead = {}, {}, {}
@@ -4720,6 +4826,48 @@ run(function()
 end)
 	
 run(function()
+	local RavenTP
+	
+	RavenTP = vape.Categories.Utility:CreateModule({
+		Name = 'RavenTP',
+		Function = function(callback)
+			if callback then
+				RavenTP:Toggle()
+				local plr = entitylib.EntityMouse({
+					Range = 1000,
+					Players = true,
+					Part = 'RootPart'
+				})
+	
+				if getItem('raven') and plr then
+					bedwars.Client:Get(remotes.SpawnRaven):CallServerAsync():andThen(function(projectile)
+						if projectile then
+							local bodyforce = Instance.new('BodyForce')
+							bodyforce.Force = Vector3.new(0, projectile.PrimaryPart.AssemblyMass * workspace.Gravity, 0)
+							bodyforce.Parent = projectile.PrimaryPart
+	
+							if plr then
+								task.spawn(function()
+									for _ = 1, 20 do
+										if plr.RootPart and projectile then
+											projectile:SetPrimaryPartCFrame(CFrame.lookAlong(plr.RootPart.Position, gameCamera.CFrame.LookVector))
+										end
+										task.wait(0.05)
+									end
+								end)
+								task.wait(0.3)
+								bedwars.RavenController:detonateRaven()
+							end
+						end
+					end)
+				end
+			end
+		end,
+		Tooltip = 'Spawns and teleports a raven to a player\nnear your mouse.'
+	})
+end)
+	
+run(function()
 	local Scaffold
 	local Expand
 	local Tower
@@ -4924,327 +5072,13 @@ run(function()
 		Tooltip = 'Lets you buy things like armor early.'
 	})
 end)
-
-
-run(function()
-    local BlockIn = {}
-	local HandCheck = {Enabled = false}
-	local AutoSwitch = {Enabled = false}
-    
-    local PatternArchitect = {}
-    PatternArchitect.__index = PatternArchitect
-    
-    function PatternArchitect.new()
-        local self = setmetatable({}, PatternArchitect)
-        self.fixedPattern = {
-            Vector3.new(3, 0, 0),
-            Vector3.new(0, 0, 3),
-            Vector3.new(-3, 0, 0),
-            Vector3.new(0, 0, -3),
-            Vector3.new(3, 3, 0),
-            Vector3.new(0, 3, 3),
-            Vector3.new(-3, 3, 0),
-            Vector3.new(0, 3, -3),
-            Vector3.new(0, 6, 0)
-        }
-        return self
-    end
-    
-    function PatternArchitect:GenerateAdaptiveBlueprint(origin)
-        local blueprint = {}
-        for i, offset in ipairs(self.fixedPattern) do
-            blueprint[i] = origin + offset
-        end
-        return blueprint
-    end
-    
-    local BlockStrategist = {}
-    BlockStrategist.__index = BlockStrategist
-    
-    function BlockStrategist.new()
-        local self = setmetatable({}, BlockStrategist)
-        self.cache = nil
-        return self
-    end
-    
-    function BlockStrategist:EvaluateInventory(inventory)
-        if self.cache then return self.cache end
-        
-        local blocks = {}
-        for _, item in pairs(inventory) do
-            local meta = bedwars.ItemMeta[item.itemType]
-            if meta.block then
-                blocks[#blocks + 1] = {itemType = item.itemType, score = meta.block.health or 0, tool = item.tool}
-            end
-        end
-        table.sort(blocks, function(a, b) return a.score < b.score end)
-        self.cache = blocks
-        return blocks
-    end
-    
-    function BlockStrategist:ResetCache()
-        self.cache = nil
-    end
-    
-    BlockIn = vape.Categories.Utility:CreateModule({
-        Name = 'BlockIn',
-        Function = function(callback)
-            if not callback then return end
-            
-            if not entitylib.isAlive or not entitylib.character or not entitylib.character.RootPart then
-                errorNotification('BlockIn', 'Unable to initialize BlockIn: Player data missing', 5)
-                BlockIn:Toggle()
-                return
-            end
-
-			if HandCheck.Enabled and not AutoSwitch.Enabled then
-				if not (store.hand and store.hand.toolType == "block") then
-					errorNotification("BlockIn | Hand Check", "You aren't holding a block!", 1.5)
-					BlockIn:Toggle()
-					return
-				end
-			end
-            
-            local architect = PatternArchitect.new()
-            local strategist = BlockStrategist.new()
-            
-            local origin = entitylib.character.RootPart.Position
-            local blocks = strategist:EvaluateInventory(store.inventory.inventory.items)
-            
-            if #blocks == 0 then
-				errorNotification('BlockIn', 'No suitable blocks available for BlockIn', 5)
-                BlockIn:Toggle()
-                return
-            end
-            
-            local blueprint = architect:GenerateAdaptiveBlueprint(origin)
-            
-            task.spawn(function()
-                local blockIndex = 1
-                local blockCount = #blocks
-                
-                for i, pos in ipairs(blueprint) do
-                    if not BlockIn.Enabled then break end
-                    local blockAtPos = bedwars.BlockController:getStore():getBlockAt(bedwars.BlockController:getBlockPosition(pos))
-                    if not blockAtPos then
-                        local block = blocks[blockIndex]
-						if AutoSwitch.Enabled then 
-							switchItem(block.tool)
-						end
-                        local success = pcall(function()
-                            bedwars.placeBlock(pos, block.itemType, false)
-                        end)
-                        if not success then
-							errorNotification('BlockIn', 'Failed to place block at position', 3)
-                        end
-                        blockIndex = (blockIndex % blockCount) + 1
-                        task.wait(0.05) 
-                    end
-                end
-                
-                strategist:ResetCache()
-                if BlockIn.Enabled then
-                    BlockIn:Toggle()
-                end
-            end)
-        end,
-        Tooltip = 'Shields you from attacks for when you are attacking a bed'
-    })
-
-	HandCheck = BlockIn:CreateToggle({
-		Name = "Hand Check",
-		Function = function() end,
-		Default = false
-	})
-
-	AutoSwitch = BlockIn:CreateToggle({
-		Name = "Auto Switch", 
-		Function = function() end, 
-		Default = true
-	})
-end)
-
-run(function()
-    local anim
-    local asset
-    local lastPosition
-    local NightmareEmote
-
-    NightmareEmote = vape.Categories.World:CreateModule({
-        Name = "NightmareEmote",
-        Function = function(call)
-            if call then
-                local l__GameQueryUtil__8
-                if (not shared.CheatEngineMode) then 
-                    l__GameQueryUtil__8 = require(game:GetService("ReplicatedStorage")['rbxts_include']['node_modules']['@easy-games']['game-core'].out).GameQueryUtil 
-                else
-                    local backup = {}; function backup:setQueryIgnored() end; l__GameQueryUtil__8 = backup;
-                end
-
-                local l__TweenService__9 = game:GetService("TweenService")
-                local player = game:GetService("Players").LocalPlayer
-                local p6 = player.Character
-                
-                if not p6 then NightmareEmote:Toggle() return end
-                
-                local v10 = game:GetService("ReplicatedStorage"):WaitForChild("Assets"):WaitForChild("Effects"):WaitForChild("NightmareEmote"):Clone()
-                asset = v10
-                v10.Parent = game.Workspace
-                lastPosition = p6.PrimaryPart and p6.PrimaryPart.Position or Vector3.new()
-
-                task.spawn(function()
-                    while asset ~= nil do
-                        local currentPosition = p6.PrimaryPart and p6.PrimaryPart.Position
-                        if currentPosition and (currentPosition - lastPosition).Magnitude > 0.1 then
-                            asset:Destroy()
-                            asset = nil
-                            NightmareEmote:Toggle()
-                            break
-                        end
-                        lastPosition = currentPosition
-                        v10:SetPrimaryPartCFrame(p6.LowerTorso.CFrame + Vector3.new(0, -2, 0))
-                        task.wait()
-                    end
-                end)
-
-                local v11 = v10:GetDescendants()
-                local function v12(p8)
-                    if p8:IsA("BasePart") then
-                        l__GameQueryUtil__8:setQueryIgnored(p8, true)
-                        p8.CanCollide = false
-                        p8.Anchored = true
-                    end
-                end
-
-                for _, v14 in ipairs(v11) do
-                    v12(v14)
-                end
-
-                local l__Outer__15 = v10:FindFirstChild("Outer")
-                if l__Outer__15 then
-                    l__TweenService__9:Create(l__Outer__15, TweenInfo.new(1.5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), {
-                        Orientation = l__Outer__15.Orientation + Vector3.new(0, 360, 0)
-                    }):Play()
-                end
-
-                local l__Middle__16 = v10:FindFirstChild("Middle")
-                if l__Middle__16 then
-                    l__TweenService__9:Create(l__Middle__16, TweenInfo.new(12.5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), {
-                        Orientation = l__Middle__16.Orientation + Vector3.new(0, -360, 0)
-                    }):Play()
-                end
-
-                anim = Instance.new("Animation")
-                anim.AnimationId = "rbxassetid://9191822700"
-                anim = p6.Humanoid:LoadAnimation(anim)
-                anim:Play()
-            else 
-                if anim then 
-                    anim:Stop()
-                    anim = nil
-                end
-                if asset then
-                    asset:Destroy()
-                    asset = nil
-                end
-            end
-        end
-    })
-end)
-
-run(function()
-    local AntiLag
-    local ToggleState = false
-
-    local function applyAntiLag()
-        local Terrain = workspace:FindFirstChildOfClass('Terrain')
-        if Terrain then
-            Terrain.WaterWaveSize = 0
-            Terrain.WaterWaveSpeed = 0
-            Terrain.WaterReflectance = 0
-            Terrain.WaterTransparency = 1
-        end
-
-        local Lighting = game:GetService('Lighting')
-        Lighting.GlobalShadows = false
-        Lighting.FogEnd = 9e9
-        Lighting.FogStart = 9e9
-
-        settings().Rendering.QualityLevel = 1
-
-        for _, v in pairs(game:GetDescendants()) do
-            if v:IsA("BasePart") then
-                v.Material = Enum.Material.Plastic
-                v.Reflectance = 0
-                v.BackSurface = Enum.SurfaceType.SmoothNoOutlines
-                v.BottomSurface = Enum.SurfaceType.SmoothNoOutlines
-                v.FrontSurface = Enum.SurfaceType.SmoothNoOutlines
-                v.LeftSurface = Enum.SurfaceType.SmoothNoOutlines
-                v.RightSurface = Enum.SurfaceType.SmoothNoOutlines
-                v.TopSurface = Enum.SurfaceType.SmoothNoOutlines
-            elseif v:IsA("Decal") then
-                v.Transparency = 1
-            elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
-                v.Lifetime = NumberRange.new(0)
-            end
-        end
-
-        for _, v in pairs(Lighting:GetDescendants()) do
-            if v:IsA("PostEffect") then
-                v.Enabled = false
-            end
-        end
-
-        AntiLag:Clean(workspace.DescendantAdded:Connect(function(child)
-            task.spawn(function()
-                if child:IsA('ForceField') or child:IsA('Sparkles') or child:IsA('Smoke') or child:IsA('Fire') or child:IsA('Beam') then
-                    game:GetService('RunService').Heartbeat:Wait()
-                    child:Destroy()
-                end
-            end)
-        end))
-    end
-
-    local function revertAntiLag()
-        AntiLag:Clean()
-
-        local Terrain = workspace:FindFirstChildOfClass('Terrain')
-        if Terrain then
-            Terrain.WaterWaveSize = 0.1
-            Terrain.WaterWaveSpeed = 0.1
-            Terrain.WaterReflectance = 0.5
-            Terrain.WaterTransparency = 0.5
-        end
-
-        local Lighting = game:GetService('Lighting')
-        Lighting.GlobalShadows = true
-        Lighting.FogEnd = 100000
-        Lighting.FogStart = 0
-
-        settings().Rendering.QualityLevel = Enum.QualityLevel.Level10
-    end
-
-    AntiLag = vape.Categories.World:CreateModule({
-        Name = 'Anti-Lag',
-        Function = function(callback)
-            ToggleState = callback
-            if ToggleState then
-                applyAntiLag()
-                notif('Anti-Lag', 'Anti-Lag enabled!', 3)
-            else
-                revertAntiLag()
-                notif('Anti-Lag', 'Anti-Lag disabled!', 3)
-            end
-        end,
-        Tooltip = 'Reduces lag by lowering graphics and removing certain effects.'
-    })
-end)
-
+	
 run(function()
 	local StaffDetector
 	local Mode
 	local Clans
 	local Party
+	local Profile
 	local Users
 	local blacklistedclans = {'gg', 'gg2', 'DV', 'DV2'}
 	local blacklisteduserids = {1502104539, 3826146717, 4531785383, 1049767300, 4926350670, 653085195, 184655415, 2752307430, 5087196317, 5744061325, 1536265275}
@@ -5995,177 +5829,135 @@ run(function()
 		end
 	})
 end)
-
+	
 run(function()
-    local AutoBank
-    local UIToggle
-    local UI
-    local Chests
-    local Items = {}
-    
-    local function addItem(itemType, bankable)
-        local item = Instance.new('ImageLabel')
-        item.Image = bedwars.getIcon({itemType = itemType}, true)
-        item.Size = UDim2.fromOffset(32, 32)
-        item.Name = itemType
-        item.BackgroundTransparency = 1
-        item.LayoutOrder = #UI:GetChildren()
-        item.Parent = UI
-        
-        local itemtext = Instance.new('TextLabel')
-        itemtext.Name = 'Amount'
-        itemtext.Size = UDim2.fromScale(1, 1)
-        itemtext.BackgroundTransparency = 1
-        itemtext.Text = ''
-        itemtext.TextColor3 = Color3.new(1, 1, 1)
-        itemtext.TextSize = 16
-        itemtext.TextStrokeTransparency = 0.3
-        itemtext.Font = Enum.Font.Arial
-        itemtext.Parent = item
-        
-        Items[itemType] = {Object = itemtext, Bankable = bankable}
-        print("AutoBank Debug: Added item to tracking: " .. itemType .. ", Bankable: " .. tostring(bankable))
-    end
-    
-    local function refreshBank(echest)
-        print("AutoBank Debug: Attempting to refresh bank UI.")
-        if not echest then
-            print("AutoBank Debug: RefreshBank: Ender chest object is NIL, cannot refresh UI.")
-            return
-        end
-        for i, v in Items do
-            local itemInChest = echest:FindFirstChild(i)
-            if itemInChest then
-                local amount = itemInChest:GetAttribute('Amount')
-                print("AutoBank Debug: RefreshBank: Found '" .. i .. "' in chest. Amount: " .. tostring(amount))
-                v.Object.Text = tostring(amount) or ''
-            else
-                print("AutoBank Debug: RefreshBank: '" .. i .. "' not found in chest (or is nil). Setting UI text to empty.")
-                v.Object.Text = ''
-            end
-        end
-    end
-    
-    local function nearChest()
-        if entitylib.isAlive and entitylib.character and entitylib.character.RootPart then
-            local pos = entitylib.character.RootPart.Position
-            if not Chests or #Chests == 0 then
-                 warn("AutoBank Warning: nearChest: 'Chests' table is empty or nil. Cannot check proximity.")
-                 return false
-            end
-            for _, chest in Chests do
-                if chest and chest.Position then
-                    local distance = (chest.Position - pos).Magnitude
-                    if distance < 20 then
-                        return true
-                    end
-                end
-            end
-        end
-        return false 
-    end
-    
-    local function handleState()
-        print("AutoBank Debug: handleState called.")
-        local personalChest = replicatedStorage.Inventories:FindFirstChild(lplr.Name..'_personal')
-        if not personalChest then 
-            print("AutoBank Debug: handleState: Personal chest '"..lplr.Name.."_personal' not found in ReplicatedStorage.Inventories. Cannot bank.")
-            return 
-        end
-        print("AutoBank Debug: handleState: Personal chest found: " .. personalChest.Name .. ", Class: " .. personalChest.ClassName)
-    
-        print("AutoBank Debug: Player is always attempting to deposit items (proximity check removed).")
-        local itemsToDepositCount = 0
-        for _, v in store.inventory.inventory.items do
-            local itemConfig = Items[v.itemType]
-            
-            if itemConfig and itemConfig.Bankable then 
-                itemsToDepositCount = itemsToDepositCount + 1
-                print("AutoBank Debug: handleState: Found bankable item in inventory: '" .. v.itemType .. "'. Item data (JSON): " .. httpService:JSONEncode(v))
-                
-                task.spawn(function()
-                    bedwars.Client:GetNamespace('Inventory'):Get('ChestGiveItem'):CallServer(personalChest, v.tool)
-                    
-                    print("AutoBank Debug: ChestGiveItem CallServer for '".. v.itemType .. "' (tool: " .. tostring(v.tool) .. ") called.")
-                    
-                    task.wait(0.1)
-                    refreshBank(personalChest)
-                end)
-            else
-            end
-        end
-        if itemsToDepositCount == 0 then
-            print("AutoBank Debug: handleState: No bankable items found in inventory to deposit.")
-        end
-    end
-    
-    AutoBank = vape.Categories.Inventory:CreateModule({
-        Name = 'AutoBank',
-        Function = function(callback)
-            if callback then
-                print("AutoBank Debug: Module enabled. Initializing...")
-                Chests = collection('personal-chest', AutoBank)
-                if not Chests or #Chests == 0 then
-                    warn("AutoBank Warning: No personal chests collected by 'collection'. AutoBank might not work correctly for other features.")
-                else
-                    print("AutoBank Debug: Collected " .. #Chests .. " personal chests.")
-                end
-
-                UI = Instance.new('Frame')
-                UI.Size = UDim2.new(1, 0, 0, 32)
-                UI.Position = UDim2.fromOffset(0, -240)
-                UI.BackgroundTransparency = 1
-                UI.Visible = UIToggle.Enabled
-                UI.Parent = vape.gui
-                AutoBank:Clean(UI)
-                
-                local Sort = Instance.new('UIListLayout')
-                Sort.FillDirection = Enum.FillDirection.Horizontal
-                Sort.HorizontalAlignment = Enum.HorizontalAlignment.Center
-                Sort.SortOrder = Enum.SortOrder.LayoutOrder
-                Sort.Parent = UI
-                
-                addItem('iron', true)
-                addItem('diamond', true)
-                addItem('emerald', true)
-                
-                local personalChestForInitialRefresh = replicatedStorage.Inventories:FindFirstChild(lplr.Name..'_personal')
-                if personalChestForInitialRefresh then
-                    refreshBank(personalChestForInitialRefresh)
-                else
-                    print("AutoBank Debug: Personal chest not found for initial UI refresh.")
-                end
-    
-                repeat
-                    local hotbar = lplr.PlayerGui:FindFirstChild('hotbar')
-                    hotbar = hotbar and hotbar['1']:FindFirstChild('HotbarHealthbarContainer')
-                    if hotbar then
-                        UI.Position = UDim2.fromOffset(0, (hotbar.AbsolutePosition.Y + guiService:GetGuiInset().Y) - 40)
-                    end
-    
-                    handleState()
-    
-                    task.wait(0.1)
-                until (not AutoBank.Enabled)
-            else
-                print("AutoBank Debug: Module disabled. Cleaning up items data.")
-                table.clear(Items)
-            end
-        end,
-        Tooltip = 'Automatically puts resources in ender chest'
-    })
-    
-    UIToggle = AutoBank:CreateToggle({
-        Name = 'UI',
-        Function = function(callback)
-            if AutoBank.Enabled then
-                UI.Visible = callback
-            end
-        end,
-        Default = true
-    })
+	local AutoBank
+	local UIToggle
+	local UI
+	local Chests
+	local Items = {}
+	
+	local function addItem(itemType, shop)
+		local item = Instance.new('ImageLabel')
+		item.Image = bedwars.getIcon({itemType = itemType}, true)
+		item.Size = UDim2.fromOffset(32, 32)
+		item.Name = itemType
+		item.BackgroundTransparency = 1
+		item.LayoutOrder = #UI:GetChildren()
+		item.Parent = UI
+		local itemtext = Instance.new('TextLabel')
+		itemtext.Name = 'Amount'
+		itemtext.Size = UDim2.fromScale(1, 1)
+		itemtext.BackgroundTransparency = 1
+		itemtext.Text = ''
+		itemtext.TextColor3 = Color3.new(1, 1, 1)
+		itemtext.TextSize = 16
+		itemtext.TextStrokeTransparency = 0.3
+		itemtext.Font = Enum.Font.Arial
+		itemtext.Parent = item
+		Items[itemType] = {Object = itemtext, Type = shop}
+	end
+	
+	local function refreshBank(echest)
+		for i, v in Items do
+			local item = echest:FindFirstChild(i)
+			v.Object.Text = item and item:GetAttribute('Amount') or ''
+		end
+	end
+	
+	local function nearChest()
+		if entitylib.isAlive then
+			local pos = entitylib.character.RootPart.Position
+			for _, chest in Chests do
+				if (chest.Position - pos).Magnitude < 20 then
+					return true
+				end
+			end
+		end
+	end
+	
+	local function handleState()
+		local chest = replicatedStorage.Inventories:FindFirstChild(lplr.Name..'_personal')
+		if not chest then return end
+	
+		local mapCF = workspace.MapCFrames:FindFirstChild((lplr:GetAttribute('Team') or 1)..'_spawn')
+		if mapCF and (entitylib.character.RootPart.Position - mapCF.Value.Position).Magnitude < 80 then
+			for _, v in chest:GetChildren() do
+				local item = Items[v.Name]
+				if item then
+					task.spawn(function()
+						bedwars.Client:GetNamespace('Inventory'):Get('ChestGetItem'):CallServer(chest, v)
+						refreshBank(chest)
+					end)
+				end
+			end
+		else
+			for _, v in store.inventory.inventory.items do
+				local item = Items[v.itemType]
+				if item then
+					task.spawn(function()
+						bedwars.Client:GetNamespace('Inventory'):Get('ChestGiveItem'):CallServer(chest, v.tool)
+						refreshBank(chest)
+					end)
+				end
+			end
+		end
+	end
+	
+	AutoBank = vape.Categories.Inventory:CreateModule({
+		Name = 'AutoBank',
+		Function = function(callback)
+			if callback then
+				Chests = collection('personal-chest', AutoBank)
+				UI = Instance.new('Frame')
+				UI.Size = UDim2.new(1, 0, 0, 32)
+				UI.Position = UDim2.fromOffset(0, -240)
+				UI.BackgroundTransparency = 1
+				UI.Visible = UIToggle.Enabled
+				UI.Parent = vape.gui
+				AutoBank:Clean(UI)
+				local Sort = Instance.new('UIListLayout')
+				Sort.FillDirection = Enum.FillDirection.Horizontal
+				Sort.HorizontalAlignment = Enum.HorizontalAlignment.Center
+				Sort.SortOrder = Enum.SortOrder.LayoutOrder
+				Sort.Parent = UI
+				addItem('iron', true)
+				addItem('gold', true)
+				addItem('diamond', false)
+				addItem('emerald', true)
+				addItem('void_crystal', true)
+	
+				repeat
+					local hotbar = lplr.PlayerGui:FindFirstChild('hotbar')
+					hotbar = hotbar and hotbar['1']:FindFirstChild('HotbarHealthbarContainer')
+					if hotbar then
+						UI.Position = UDim2.fromOffset(0, (hotbar.AbsolutePosition.Y + guiService:GetGuiInset().Y) - 40)
+					end
+	
+					local newState = nearChest()
+					if newState then
+						handleState()
+					end
+	
+					task.wait(0.1)
+				until (not AutoBank.Enabled)
+			else
+				table.clear(Items)
+			end
+		end,
+		Tooltip = 'Automatically puts resources in ender chest'
+	})
+	UIToggle = AutoBank:CreateToggle({
+		Name = 'UI',
+		Function = function(callback)
+			if AutoBank.Enabled then
+				UI.Visible = callback
+			end
+		end,
+		Default = true
+	})
 end)
-
+	
 run(function()
 	local AutoBuy
 	local Sword
@@ -7254,7 +7046,6 @@ run(function()
 		Tooltip = 'Drops items fast when you hold Q'
 	})
 end)
-
 	
 run(function()
 	local BedPlates
@@ -8731,119 +8522,6 @@ run(function()
 		end
 	})
 end)
-
-	
-run(function()
-	local NoFall
-	local Mode
-	local rayParams = RaycastParams.new()
-	local groundHit
-	task.spawn(function()
-		groundHit = bedwars.Client:Get(remotes.GroundHit).instance
-	end)
-	
-	NoFall = vape.Categories.Blatant:CreateModule({
-		Name = 'NoFall',
-		Function = function(callback)
-			if callback then
-				local tracked = 0
-				if Mode.Value == 'Gravity' then
-					local extraGravity = 0
-					NoFall:Clean(runService.PreSimulation:Connect(function(dt)
-						if entitylib.isAlive then
-							local root = entitylib.character.RootPart
-							if root.AssemblyLinearVelocity.Y < -85 then
-								rayParams.FilterDescendantsInstances = {lplr.Character, gameCamera}
-								rayParams.CollisionGroup = root.CollisionGroup
-	
-								local rootSize = root.Size.Y / 2 + entitylib.character.HipHeight
-								local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, (tracked * 0.1) - rootSize, 0), rayParams)
-								if not ray then
-									root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -86, root.AssemblyLinearVelocity.Z)
-									root.CFrame += Vector3.new(0, extraGravity * dt, 0)
-									extraGravity += -workspace.Gravity * dt
-								end
-							else
-								extraGravity = 0
-							end
-						end
-					end))
-				else
-					repeat
-						if entitylib.isAlive then
-							local root = entitylib.character.RootPart
-							tracked = entitylib.character.Humanoid.FloorMaterial == Enum.Material.Air and math.min(tracked, root.AssemblyLinearVelocity.Y) or 0
-	
-							if tracked < -85 then
-								if Mode.Value == 'Packet' then
-									groundHit:FireServer(nil, Vector3.new(0, tracked, 0), workspace:GetServerTimeNow())
-								else
-									rayParams.FilterDescendantsInstances = {lplr.Character, gameCamera}
-									rayParams.CollisionGroup = root.CollisionGroup
-	
-									local rootSize = root.Size.Y / 2 + entitylib.character.HipHeight
-									if Mode.Value == 'Teleport' then
-										local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, -1000, 0), rayParams)
-										if ray then
-											root.CFrame -= Vector3.new(0, root.Position.Y - (ray.Position.Y + rootSize), 0)
-										end
-									else
-										local ray = workspace:Blockcast(root.CFrame, Vector3.new(3, 3, 3), Vector3.new(0, (tracked * 0.1) - rootSize, 0), rayParams)
-										if ray then
-											tracked = 0
-											root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -80, root.AssemblyLinearVelocity.Z)
-										end
-									end
-								end
-							end
-						end
-	
-						task.wait(0.03)
-					until not NoFall.Enabled
-				end
-			end
-		end,
-		Tooltip = 'Prevents taking fall damage.'
-	})
-	Mode = NoFall:CreateDropdown({
-		Name = 'Mode',
-		List = {'Packet', 'Gravity', 'Teleport', 'Bounce'},
-		Function = function()
-			if NoFall.Enabled then
-				NoFall:Toggle()
-				NoFall:Toggle()
-			end
-		end
-	})
-end)
-run(function()
-    local PromptButtonHoldBegan = nil
-    local ProximityPromptService = cloneref(game:GetService('ProximityPromptService'))
-
-    local InstantPP = vape.Categories.Utility:CreateModule({
-        Name = 'InstantPP',
-        Function = function(callback)
-            if callback then
-                if fireproximityprompt then
-                    PromptButtonHoldBegan = ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
-                        fireproximityprompt(prompt)
-                    end)
-
-                    InstantPP:Clean(PromptButtonHoldBegan)
-                else
-                    errorNotification('InstantPP', 'Your exploit does not support this command (missing fireproximityprompt)', 5)
-                    InstantPP:Toggle()
-                end
-            else
-                if PromptButtonHoldBegan ~= nil then
-                    PromptButtonHoldBegan:Disconnect()
-                    PromptButtonHoldBegan = nil
-                end
-            end
-        end,
-        Tooltip = 'Instantly activates proximity prompts.'
-    })
-end)
 	
 run(function()
 	local WinEffect
@@ -8879,3 +8557,4 @@ run(function()
 		List = WinEffectName
 	})
 end)
+	
