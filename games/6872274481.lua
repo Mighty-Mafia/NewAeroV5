@@ -2936,16 +2936,17 @@ run(function()
 	
 						local newlook = CFrame.new(offsetpos, plr[TargetPart.Value].Position) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
 						
+						-- Enhanced prediction with movement prediction
 						local predictedPosition = prediction.predictStrafingMovement(
 							plr.Player, 
 							plr[TargetPart.Value], 
 							projSpeed, 
 							gravity,
-							newlook.p
+							offsetpos
 						)
 
 						local calc = prediction.SolveTrajectory(
-							newlook.p, 
+							offsetpos, 
 							projSpeed, 
 							gravity, 
 							predictedPosition, 
@@ -2959,7 +2960,7 @@ run(function()
 						if calc then
 							targetinfo.Targets[plr] = tick() + 1
 							return {
-								initialVelocity = CFrame.new(newlook.Position, calc).LookVector * projSpeed,
+								initialVelocity = CFrame.new(offsetpos, calc).LookVector * projSpeed,
 								positionFrom = offsetpos,
 								deltaT = lifetime,
 								gravitationalAcceleration = gravity,
