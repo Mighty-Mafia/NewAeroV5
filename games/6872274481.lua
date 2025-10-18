@@ -2944,8 +2944,80 @@ run(function()
 			table.insert(CoreConnections, con)
 		end
 	end
+
+	local movementHistory = {}
+
+	local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, gravity, origin)
+		if not targetPlayer or not targetPlayer.Character or not targetPart then 
+			return targetPart and targetPart.Position or Vector3.zero
+		end
+		
+		local currentPos = targetPart.Position
+		local currentVel = targetPart.Velocity
+		local distance = (currentPos - origin).Magnitude
+		
+		local baseTimeToTarget = distance / projSpeed
+		local velocityMagnitude = Vector3.new(currentVel.X, 0, currentVel.Z).Magnitude
+		local verticalVel = currentVel.Y
+		
+		local timeMultiplier = 1.0
+		if distance > 80 then
+			timeMultiplier = 0.95
+		elseif distance > 50 then
+			timeMultiplier = 0.98
+		elseif distance < 20 then
+			timeMultiplier = 1.08
+		end
+		
+		local timeToTarget = baseTimeToTarget * timeMultiplier
+		
+		local horizontalPredictionStrength = 0.80
+		if distance > 70 then
+			horizontalPredictionStrength = 0.70
+		elseif distance > 40 then
+			horizontalPredictionStrength = 0.75
+		elseif distance < 25 then
+			horizontalPredictionStrength = 0.88
+		end
+		
+		local horizontalVel = Vector3.new(currentVel.X, 0, currentVel.Z)
+		local predictedHorizontal = horizontalVel * timeToTarget * horizontalPredictionStrength
+		
+		local verticalPrediction = 0
+		local isJumping = verticalVel > 10
+		local isFalling = verticalVel < -15
+		local isPeaking = math.abs(verticalVel) < 3 and verticalVel < 1
+		
+		if isFalling then
+			verticalPrediction = verticalVel * timeToTarget * 0.32
+		elseif isJumping then
+			verticalPrediction = verticalVel * timeToTarget * 0.28
+		elseif isPeaking then
+			verticalPrediction = -2 * timeToTarget
+		else
+			verticalPrediction = verticalVel * timeToTarget * 0.25
+		end
+		
+		local finalPosition = currentPos + predictedHorizontal + Vector3.new(0, verticalPrediction, 0)
+		
+		return finalPosition
+	end
+
+	local function smoothAim(currentCFrame, targetPosition, distance)
+		local smoothnessFactor = 0.85
+		
+		if distance > 70 then
+			smoothnessFactor = 0.75
+		elseif distance > 40 then
+			smoothnessFactor = 0.80
+		elseif distance < 20 then
+			smoothnessFactor = 0.92
+		end
+		
+		return currentCFrame:Lerp(CFrame.new(currentCFrame.Position, targetPosition), smoothnessFactor)
+	end
 	
-	ProjectileAimbot = vape.Categories.World:CreateModule({
+	ProjectileAimbot = vape.Categories.Blatant:CreateModule({
 		Name = 'ProjectileAimbot',
 		Function = function(callback)
 			if callback then
@@ -3027,31 +3099,51 @@ run(function()
 						TargetPart.Value = TargetPart.Value == "RootPart" and "PrimaryPart" or TargetPart.Value
 						local targetPart = plr.Character[TargetPart.Value]
 						
-						local predictedPosition = prediction.predictStrafingMovement(plr, targetPart, projSpeed, gravity, offsetpos)
+						local predictedPosition = predictStrafingMovement(plr, targetPart, projSpeed, gravity, offsetpos)
 						
-						if not predictedPosition then
-							local newlook = CFrame.new(offsetpos, targetPart.Position) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
-							local calc = prediction.SolveTrajectory(newlook.p, projSpeed, gravity, targetPart.Position, projmeta.projectile == 'telepearl' and Vector3.zero or targetPart.Velocity, playerGravity, plr.HipHeight, plr.Jumping and 42.6 or nil, rayCheck)
-							if calc then
-								predictedPosition = calc
-							else
-								predictedPosition = targetPart.Position
-							end
+						local rawLook = CFrame.new(offsetpos, targetPart.Position)
+						local distance = (targetPart.Position - offsetpos).Magnitude
+						
+						local newlook = smoothAim(rawLook, predictedPosition, distance)
+						
+						if projmeta.projectile ~= 'owl_projectile' then
+							newlook = newlook * CFrame.new(
+								bedwars.BowConstantsTable.RelX or 0,
+								bedwars.BowConstantsTable.RelY or 0, 
+								bedwars.BowConstantsTable.RelZ or 0
+							)
 						end
 						
-						local currentLook = CFrame.new(offsetpos, targetPart.Position)
-						local distance = (offsetpos - targetPart.Position).Magnitude
-						local smoothedLook = prediction.smoothAim(currentLook, predictedPosition, distance)
+						local targetVelocity = projmeta.projectile == 'telepearl' and Vector3.zero or targetPart.Velocity
+						local calc = prediction.SolveTrajectory(
+							newlook.p, 
+							projSpeed, 
+							gravity, 
+							predictedPosition, 
+							targetVelocity, 
+							playerGravity, 
+							plr.HipHeight, 
+							plr.Jumping and 50 or nil,
+							rayCheck
+						)
 						
-						if predictedPosition then
-							targetinfo.Targets[plr] = tick() + 1
-							return {
-								initialVelocity = smoothedLook.LookVector * projSpeed,
-								positionFrom = offsetpos,
-								deltaT = lifetime,
-								gravitationalAcceleration = gravity,
-								drawDurationSeconds = 5
-							}
+						if calc then
+							local finalDirection = (calc - newlook.p).Unit
+							local angleFromHorizontal = math.acos(math.clamp(finalDirection:Dot(Vector3.new(0, 1, 0)), -1, 1))
+							
+							local minAngle = math.rad(1)
+							local maxAngle = math.rad(179)
+							
+							if angleFromHorizontal > minAngle and angleFromHorizontal < maxAngle then
+								targetinfo.Targets[plr] = tick() + 1
+								return {
+									initialVelocity = finalDirection * projSpeed,
+									positionFrom = offsetpos,
+									deltaT = lifetime,
+									gravitationalAcceleration = gravity,
+									drawDurationSeconds = 5
+								}
+							end
 						end
 					end
 
