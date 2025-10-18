@@ -2020,7 +2020,6 @@ run(function()
 	local Particles, Boxes = {}, {}
 	local anims, AnimDelay, AnimTween, armC0 = vape.Libraries.auraanims, tick()
 	local AttackRemote = {FireServer = function() end}
-	local sigridcheck = false
 	task.spawn(function()
 		AttackRemote = bedwars.Client:Get(remotes.AttackEntity).instance
 	end)
@@ -2043,7 +2042,7 @@ run(function()
 		end
 
 		if LegitAura.Enabled then
-			if workspace:GetServerTimeNow() - bedwars.SwordController.lastAttack > 0.2 then return false end
+			if (tick() - bedwars.SwordController.lastSwing) > 0.2 then return false end
 		end
 
 		return sword, meta
@@ -2121,13 +2120,8 @@ run(function()
 					Attacking = false
 					store.KillauraTarget = nil
 					if sword then
-						if sigridcheck and entitylib.isAlive and lplr.Character:FindFirstChild("elk") then 
-							task.wait(1 / UpdateRate.Value)
-							continue 
-						end
-						
 						local plrs = entitylib.AllPosition({
-							Range = Range.Value,
+							Range = SwingRange.Value,
 							Wallcheck = Targets.Walls.Enabled or nil,
 							Part = 'RootPart',
 							Players = Targets.Players.Enabled,
@@ -2492,13 +2486,6 @@ run(function()
 	LegitAura = Killaura:CreateToggle({
 		Name = 'Swing only',
 		Tooltip = 'Only attacks while swinging manually'
-	})
-	Killaura:CreateToggle({
-		Name = "Sigrid Check",
-		Default = false,
-		Function = function(call)
-			sigridcheck = call
-		end
 	})
 end)
 	
