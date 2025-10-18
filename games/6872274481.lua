@@ -3026,7 +3026,7 @@ run(function()
 						TargetPart.Value = TargetPart.Value == "RootPart" and "PrimaryPart" or TargetPart.Value
 						local targetPart = plr.Character[TargetPart.Value]
 						
-						local predictedPosition = prediction.predictStrafingMovement(plr, targetPart, projSpeed, gravity, offsetpos)
+						local predictedPosition = prediction.predictStrafingMovement(plr.Player, targetPart, projSpeed, gravity, offsetpos)
 						
 						local rawLook = CFrame.new(offsetpos, targetPart.Position)
 						local distance = (targetPart.Position - offsetpos).Magnitude
