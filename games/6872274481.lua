@@ -2938,84 +2938,14 @@ run(function()
 				local ray = workspace.CurrentCamera:ScreenPointToRay(touchPos.X, touchPos.Y)
 				local result = workspace:Raycast(ray.Origin, ray.Direction * 1000)
 				if result and result.Instance then
-					selectTarget(target)
+					selectTarget(result.Instance)
 				end
 			end)
 			table.insert(CoreConnections, con)
 		end
 	end
 
-	local movementHistory = {}
-
-	local function predictStrafingMovement(targetPlayer, targetPart, projSpeed, gravity, origin)
-		if not targetPlayer or not targetPlayer.Character or not targetPart then 
-			return targetPart and targetPart.Position or Vector3.zero
-		end
-		
-		local currentPos = targetPart.Position
-		local currentVel = targetPart.Velocity
-		local distance = (currentPos - origin).Magnitude
-		
-		local baseTimeToTarget = distance / projSpeed
-		local velocityMagnitude = Vector3.new(currentVel.X, 0, currentVel.Z).Magnitude
-		local verticalVel = currentVel.Y
-		
-		local timeMultiplier = 1.0
-		if distance > 80 then
-			timeMultiplier = 0.95
-		elseif distance > 50 then
-			timeMultiplier = 0.98
-		elseif distance < 20 then
-			timeMultiplier = 1.08
-		end
-		
-		local timeToTarget = baseTimeToTarget * timeMultiplier
-		
-		local horizontalPredictionStrength = 0.80
-		if distance > 70 then
-			horizontalPredictionStrength = 0.70
-		elseif distance > 40 then
-			horizontalPredictionStrength = 0.75
-		elseif distance < 25 then
-			horizontalPredictionStrength = 0.88
-		end
-		
-		local horizontalVel = Vector3.new(currentVel.X, 0, currentVel.Z)
-		local predictedHorizontal = horizontalVel * timeToTarget * horizontalPredictionStrength
-		
-		local verticalPrediction = 0
-		local isJumping = verticalVel > 10
-		local isFalling = verticalVel < -15
-		local isPeaking = math.abs(verticalVel) < 3 and verticalVel < 1
-		
-		if isFalling then
-			verticalPrediction = verticalVel * timeToTarget * 0.32
-		elseif isJumping then
-			verticalPrediction = verticalVel * timeToTarget * 0.28
-		elseif isPeaking then
-			verticalPrediction = -2 * timeToTarget
-		else
-			verticalPrediction = verticalVel * timeToTarget * 0.25
-		end
-		
-		local finalPosition = currentPos + predictedHorizontal + Vector3.new(0, verticalPrediction, 0)
-		
-		return finalPosition
-	end
-
-	local function smoothAim(currentCFrame, targetPosition, distance)
-		local smoothnessFactor = 0.85
-		
-		if distance > 70 then
-			smoothnessFactor = 0.75
-		elseif distance > 40 then
-			smoothnessFactor = 0.80
-		elseif distance < 20 then
-			smoothnessFactor = 0.92
-		end
-		
-		return currentCFrame:Lerp(CFrame.new(currentCFrame.Position, targetPosition), smoothnessFactor)
-	end
+	local prediction = vape.Libraries.prediction
 	
 	ProjectileAimbot = vape.Categories.World:CreateModule({
 		Name = 'ProjectileAimbot',
@@ -3063,11 +2993,21 @@ run(function()
 						local playerGravity = workspace.Gravity
 
 						if balloons and balloons > 0 then
-							playerGravity = (workspace.Gravity * (1 - ((balloons >= 4 and 1.2 or balloons >= 3 and 1 or 0.975))))
+							local gravityMultiplier = 1 - (balloons * 0.05)
+							playerGravity = workspace.Gravity * math.max(gravityMultiplier, 0.7)
 						end
 
 						if plr.Character.PrimaryPart:FindFirstChild('rbxassetid://8200754399') then
 							playerGravity = 6
+						end
+
+						if plr.Player and plr.Player:GetAttribute('IsOwlTarget') then
+							for _, owl in collectionService:GetTagged('Owl') do
+								if owl:GetAttribute('Target') == plr.Player.UserId and owl:GetAttribute('Status') == 2 then
+									playerGravity = 0
+									break
+								end
+							end
 						end
 
 						if store.hand and store.hand.tool and store.hand.tool.Name:find("spellbook") then
@@ -3099,12 +3039,12 @@ run(function()
 						TargetPart.Value = TargetPart.Value == "RootPart" and "PrimaryPart" or TargetPart.Value
 						local targetPart = plr.Character[TargetPart.Value]
 						
-						local predictedPosition = predictStrafingMovement(plr, targetPart, projSpeed, gravity, offsetpos)
+						local predictedPosition = prediction.predictStrafingMovement(plr.Player, targetPart, projSpeed, gravity, offsetpos)
 						
 						local rawLook = CFrame.new(offsetpos, targetPart.Position)
 						local distance = (targetPart.Position - offsetpos).Magnitude
 						
-						local newlook = smoothAim(rawLook, predictedPosition, distance)
+						local newlook = prediction.smoothAim(rawLook, predictedPosition, distance)
 						
 						if projmeta.projectile ~= 'owl_projectile' then
 							newlook = newlook * CFrame.new(
