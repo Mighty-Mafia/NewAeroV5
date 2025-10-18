@@ -3017,7 +3017,7 @@ run(function()
 		return currentCFrame:Lerp(CFrame.new(currentCFrame.Position, targetPosition), smoothnessFactor)
 	end
 	
-	ProjectileAimbot = vape.Categories.Blatant:CreateModule({
+	ProjectileAimbot = vape.Categories.World:CreateModule({
 		Name = 'ProjectileAimbot',
 		Function = function(callback)
 			if callback then
