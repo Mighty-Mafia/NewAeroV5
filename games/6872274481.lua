@@ -2934,7 +2934,7 @@ run(function()
 
 	local prediction = vape.Libraries.prediction
 	
-	ProjectileAimbot = vape.Categories.World:CreateModule({
+	ProjectileAimbot = vape.Categories.Blatant:CreateModule({
 		Name = 'ProjectileAimbot',
 		Function = function(callback)
 			if callback then
