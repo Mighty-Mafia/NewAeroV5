@@ -1,3 +1,4 @@
+--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -2862,6 +2863,8 @@ run(function()
 end)
 	
 run(function()
+	local oldCalculateImportantLaunchValues = nil
+	local hovering = false
 	local TargetPart
 	local Targets
 	local FOV
@@ -2869,6 +2872,7 @@ run(function()
 	local OtherProjectiles
 	local rayCheck = RaycastParams.new()
 	rayCheck.FilterType = Enum.RaycastFilterType.Include
+	rayCheck.FilterDescendantsInstances = {workspace:FindFirstChild('Map') or workspace}
 	rayCheck.FilterDescendantsInstances = {workspace:FindFirstChild('Map')}
 	local old
 	local selectedTarget = nil
@@ -2896,7 +2900,6 @@ run(function()
 	end
 
 	local CoreConnections = {}
-	local hovering = false
 	local Players = game:GetService("Players")
 	
 	local function handlePlayerSelection()
@@ -2939,7 +2942,7 @@ run(function()
 		Function = function(callback)
 			if callback then
 				handlePlayerSelection()
-				old = bedwars.ProjectileController.calculateImportantLaunchValues
+				local oldCalculateImportantLaunchValues = bedwars.ProjectileController.calculateImportantLaunchValues
 				bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
 					hovering = true
 					local self, projmeta, worldmeta, origin, shootpos = ...
@@ -2950,7 +2953,7 @@ run(function()
 						plr = selectedTarget
 					else
 						plr = entitylib.EntityMouse({
-							Part = 'RootPart',
+							Part = TargetPart.Value,
 							Range = FOV.Value,
 							Players = Targets.Players.Enabled,
 							NPCs = Targets.NPCs.Enabled,
@@ -2960,18 +2963,17 @@ run(function()
 					end
 					updateOutline(plr)
 					
-					if plr and (plr.Character.PrimaryPart.Position - originPos).Magnitude <= Range.Value then
-						plr.HipHeight = plr.Character:FindFirstChild("Humanoid") and plr.Character:FindFirstChild("Humanoid").HipHeight or 2
-						local pos = shootpos or self:getLaunchPosition(origin)
+					if plr and plr.Character and plr[TargetPart.Value] and (plr[TargetPart.Value].Position - originPos).Magnitude <= Range.Value then
+						local pos = shootpos or (self.getLaunchPosition and self:getLaunchPosition(origin) or origin)
 						if not pos then
-							return old(...)
+							return oldCalculateImportantLaunchValues(...)
 						end
 
 						if (not OtherProjectiles.Enabled) and not projmeta.projectile:find('arrow') then
-							return old(...)
+							return oldCalculateImportantLaunchValues(...)
 						end
 
-						local meta = projmeta:getProjectileMeta()
+						local meta = projmeta:getProjectileMeta() or {}
 						local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
 						local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
 						local projSpeed = (meta.launchVelocity or 100)
@@ -2984,7 +2986,7 @@ run(function()
 							playerGravity = workspace.Gravity * math.max(gravityMultiplier, 0.7)
 						end
 
-						if plr.Character.PrimaryPart:FindFirstChild('rbxassetid://8200754399') then
+						if plr.Character.PrimaryPart and plr.Character.PrimaryPart:FindFirstChild('rbxassetid://8200754399') then
 							playerGravity = 6
 						end
 
@@ -3001,9 +3003,9 @@ run(function()
 							local targetPos = plr.RootPart.Position
 							local selfPos = lplr.Character.PrimaryPart.Position
 							local expectedTime = (selfPos - targetPos).Magnitude / 160
-							targetPos += (plr.RootPart.Velocity * expectedTime)
+							targetPos = targetPos + (plr.RootPart.Velocity * expectedTime)
 							return {
-								initialVelocity = (selfPos - targetPos).Unit * -160,
+								initialVelocity = (targetPos - selfPos).Unit * 160,
 								positionFrom = offsetpos,
 								deltaT = 2,
 								gravitationalAcceleration = 1,
@@ -3013,9 +3015,9 @@ run(function()
 							local targetPos = plr.RootPart.Position
 							local selfPos = lplr.Character.PrimaryPart.Position
 							local expectedTime = (selfPos - targetPos).Magnitude / 80
-							targetPos += (plr.RootPart.Velocity * expectedTime)
+							targetPos = targetPos + (plr.RootPart.Velocity * expectedTime)
 							return {
-								initialVelocity = (selfPos - targetPos).Unit * -80,
+								initialVelocity = (targetPos - selfPos).Unit * 80,
 								positionFrom = offsetpos,
 								deltaT = 2,
 								gravitationalAcceleration = 1,
@@ -3023,13 +3025,10 @@ run(function()
 							}
 						end
 						
-						TargetPart.Value = TargetPart.Value == "RootPart" and "PrimaryPart" or TargetPart.Value
-						local targetPart = plr.Character[TargetPart.Value]
+						local rawLook = CFrame.new(offsetpos, plr[TargetPart.Value].Position)
+						local distance = (plr[TargetPart.Value].Position - offsetpos).Magnitude
 						
-						local predictedPosition = prediction.predictStrafingMovement(plr.Player, targetPart, projSpeed, gravity, offsetpos)
-						
-						local rawLook = CFrame.new(offsetpos, targetPart.Position)
-						local distance = (targetPart.Position - offsetpos).Magnitude
+						local predictedPosition = prediction.predictStrafingMovement(plr.Player, plr[TargetPart.Value], projSpeed, gravity, offsetpos)
 						
 						local newlook = prediction.smoothAim(rawLook, predictedPosition, distance)
 						
@@ -3041,7 +3040,7 @@ run(function()
 							)
 						end
 						
-						local targetVelocity = projmeta.projectile == 'telepearl' and Vector3.zero or targetPart.Velocity
+						local targetVelocity = projmeta.projectile == 'telepearl' and Vector3.zero or plr[TargetPart.Value].Velocity
 						local calc = prediction.SolveTrajectory(
 							newlook.p, 
 							projSpeed, 
@@ -3075,10 +3074,12 @@ run(function()
 					end
 
 					hovering = false
-					return old(...)
+					return oldCalculateImportantLaunchValues(...)
 				end
 			else
-				bedwars.ProjectileController.calculateImportantLaunchValues = old
+				if bedwars.ProjectileController and bedwars.ProjectileController.calculateImportantLaunchValues then
+					bedwars.ProjectileController.calculateImportantLaunchValues = oldCalculateImportantLaunchValues
+				end
 				if targetOutline then
 					targetOutline:Destroy()
 					targetOutline = nil
