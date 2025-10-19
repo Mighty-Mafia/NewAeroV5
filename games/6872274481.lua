@@ -63,6 +63,8 @@ local store = {
 }
 local Reach = {}
 local HitBoxes = {}
+local hitboxObjects = {}
+local hitboxSet = false
 local InfiniteFly = {}
 local TrapDisabler
 local AntiFallPart
@@ -742,7 +744,7 @@ run(function()
 		DragonEndFly = debug.getproto(Knit.Controllers.VoidDragonController.flapWings, 1),
 		DragonFly = Knit.Controllers.VoidDragonController.flapWings,
 		DropItem = Knit.Controllers.ItemDropController.dropItemInHand,
-		EquipItem = debug.getproto(require(replicatedStorage.TS.entity.entities['inventory-entity']).InventoryEntity.equipItem, 3),
+		EquipItem = canReq and debug.getproto(require(replicatedStorage.TS.entity.entities['inventory-entity']).InventoryEntity.equipItem, 3) or 'SetInvItem',
 		FireProjectile = debug.getupvalue(Knit.Controllers.ProjectileController.launchProjectileWithValues, 2),
 		GroundHit = Knit.Controllers.FallDamageController.KnitStart,
 		GuitarHeal = Knit.Controllers.GuitarController.performHeal,
@@ -1891,93 +1893,107 @@ run(function()
 		Default = true
 	})
 end)
-	
+
 run(function()
-	local Mode
-	local Expand
-	local objects, set = {}
-	
-	local function createHitbox(ent)
-		if ent.Targetable and ent.Player then
-			local hitbox = Instance.new('Part')
-			hitbox.Size = Vector3.new(3, 6, 3) + Vector3.one * (Expand.Value / 5)
-			hitbox.Position = ent.RootPart.Position
-			hitbox.CanCollide = false
-			hitbox.Massless = true
-			hitbox.Transparency = 1
-			hitbox.Parent = ent.Character
-			local weld = Instance.new('Motor6D')
-			weld.Part0 = hitbox
-			weld.Part1 = ent.RootPart
-			weld.Parent = hitbox
-			objects[ent] = hitbox
-		end
-	end
-	
-	HitBoxes = vape.Categories.Blatant:CreateModule({
-		Name = 'HitBoxes',
-		Function = function(callback)
-			if callback then
-				if Mode.Value == 'Sword' then
-					debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (Expand.Value / 3))
-					set = true
-				else
-					HitBoxes:Clean(entitylib.Events.EntityAdded:Connect(createHitbox))
-					HitBoxes:Clean(entitylib.Events.EntityRemoving:Connect(function(ent)
-						if objects[ent] then
-							objects[ent]:Destroy()
-							objects[ent] = nil
-						end
-					end))
-					for _, ent in entitylib.List do
-						createHitbox(ent)
-					end
-				end
-			else
-				if set then
-					debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
-					set = nil
-				end
-				for _, part in objects do
-					part:Destroy()
-				end
-				table.clear(objects)
-			end
-		end,
-		Tooltip = 'Expands attack hitbox'
-	})
-	Mode = HitBoxes:CreateDropdown({
-		Name = 'Mode',
-		List = {'Sword', 'Player'},
-		Function = function()
-			if HitBoxes.Enabled then
-				HitBoxes:Toggle()
-				HitBoxes:Toggle()
-			end
-		end,
-		Tooltip = 'Sword - Increases the range around you to hit entities\nPlayer - Increases the players hitbox'
-	})
-	Expand = HitBoxes:CreateSlider({
-		Name = 'Expand amount',
-		Min = 0,
-		Max = 14.4,
-		Default = 14.4,
-		Decimal = 10,
-		Function = function(val)
-			if HitBoxes.Enabled then
-				if Mode.Value == 'Sword' then
-					debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (val / 3))
-				else
-					for _, part in objects do
-						part.Size = Vector3.new(3, 6, 3) + Vector3.one * (val / 5)
-					end
-				end
-			end
-		end,
-		Suffix = function(val)
-			return val == 1 and 'stud' or 'studs'
-		end
-	})
+    local Mode
+    local Expand
+    
+    local function createHitbox(ent)
+        if ent.Targetable and ent.Player and ent.Character and ent.RootPart then
+            local hitbox = Instance.new('Part')
+            hitbox.Size = Vector3.new(3, 6, 3) + Vector3.one * (Expand.Value / 2)
+            hitbox.Position = ent.RootPart.Position
+            hitbox.CanCollide = false
+            hitbox.Massless = true
+            hitbox.Transparency = 1
+            hitbox.Parent = ent.Character
+            
+            local weld = Instance.new('Motor6D')
+            weld.Part0 = hitbox
+            weld.Part1 = ent.RootPart
+            weld.C0 = CFrame.new()
+            weld.C1 = CFrame.new()
+            weld.Parent = hitbox
+            
+            hitboxObjects[ent] = hitbox
+        end
+    end
+    
+    HitBoxes = vape.Categories.Blatant:CreateModule({
+        Name = 'HitBoxes',
+        Function = function(callback)
+            if callback then
+                if Mode.Value == 'Sword' then
+                    pcall(function()
+                        debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (Expand.Value / 1.5))
+                        hitboxSet = true
+                    end)
+                else
+                    HitBoxes:Clean(entitylib.Events.EntityAdded:Connect(createHitbox))
+                    HitBoxes:Clean(entitylib.Events.EntityRemoving:Connect(function(ent)
+                        if hitboxObjects[ent] then
+                            hitboxObjects[ent]:Destroy()
+                            hitboxObjects[ent] = nil
+                        end
+                    end))
+                    
+                    for _, ent in pairs(entitylib.List) do
+                        createHitbox(ent)
+                    end
+                end
+            else
+                if hitboxSet then
+                    pcall(function()
+                        debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, 3.8)
+                    end)
+                    hitboxSet = false
+                end
+                
+                for _, part in pairs(hitboxObjects) do
+                    part:Destroy()
+                end
+                table.clear(hitboxObjects)
+            end
+        end,
+        Tooltip = 'Expands attack hitbox'
+    })
+    
+    Mode = HitBoxes:CreateDropdown({
+        Name = 'Mode',
+        List = {'Sword', 'Player'},
+        Function = function()
+            if HitBoxes.Enabled then
+                HitBoxes:Toggle()
+                HitBoxes:Toggle()
+            end
+        end
+    })
+    
+    Expand = HitBoxes:CreateSlider({
+        Name = 'Expand amount',
+        Min = 0,
+        Max = 50,
+        Default = 14.4,
+        Decimal = 10,
+        Function = function(val)
+            if HitBoxes.Enabled then
+                if Mode.Value == 'Sword' then
+                    pcall(function()
+                        debug.setconstant(bedwars.SwordController.swingSwordInRegion, 6, (val / 1.5))
+                    end)
+                else
+                    for _, part in pairs(hitboxObjects) do
+                        if part and part.Parent then
+                            part.Size = Vector3.new(3, 6, 3) + Vector3.one * (val / 2)
+                        end
+                    end
+                end
+            end
+        end,
+        Suffix = function(val)
+            return val == 1 and 'stud' or 'studs'
+        end
+    })
 end)
 	
 run(function()
@@ -2863,27 +2879,28 @@ run(function()
 end)
 	
 run(function()
-	local oldCalculateImportantLaunchValues = nil
-	local hovering = false
+	local ProjectileAimbot
 	local TargetPart
 	local Targets
 	local FOV
 	local Range
 	local OtherProjectiles
+	local Blacklist
+	local TargetVisualiser
+
 	local rayCheck = RaycastParams.new()
 	rayCheck.FilterType = Enum.RaycastFilterType.Include
 	rayCheck.FilterDescendantsInstances = {workspace:FindFirstChild('Map') or workspace}
-	rayCheck.FilterDescendantsInstances = {workspace:FindFirstChild('Map')}
-	local old
+	local oldCalculateImportantLaunchValues = nil
+	
 	local selectedTarget = nil
 	local targetOutline = nil
+	local hovering = false
+	local CoreConnections = {}
 	
 	local UserInputService = game:GetService("UserInputService")
 	local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
-	local ProjectileAimbot = {Enabled = false}
-	local TargetVisualiser = {Enabled = false}
-	
 	local function updateOutline(target)
 		if targetOutline then
 			targetOutline:Destroy()
@@ -2899,15 +2916,12 @@ run(function()
 		end
 	end
 
-	local CoreConnections = {}
-	local Players = game:GetService("Players")
-	
 	local function handlePlayerSelection()
 		local mouse = lplr:GetMouse()
 		local function selectTarget(target)
 			if not target then return end
 			if target and target.Parent then
-				local plr = Players:GetPlayerFromCharacter(target.Parent)
+				local plr = playersService:GetPlayerFromCharacter(target.Parent)
 				if plr then
 					if selectedTarget == plr then
 						selectedTarget = nil
@@ -2935,15 +2949,14 @@ run(function()
 		end
 	end
 
-	local prediction = vape.Libraries.prediction
-	
 	ProjectileAimbot = vape.Categories.Blatant:CreateModule({
-		Name = 'ProjectileAimbot',
+		Name = 'Projectile Aimbot',
 		Function = function(callback)
 			if callback then
 				handlePlayerSelection()
-				local oldCalculateImportantLaunchValues = bedwars.ProjectileController.calculateImportantLaunchValues
-				bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
+				
+				oldCalculateImportantLaunchValues = bedwars.ProjectileController.calculateImportantLaunchValues
+				bedwars.ProjectileController.calculateImportantLaunchValues = function(...)	
 					hovering = true
 					local self, projmeta, worldmeta, origin, shootpos = ...
 					local originPos = entitylib.isAlive and (shootpos or entitylib.character.RootPart.Position) or Vector3.zero
@@ -2970,6 +2983,10 @@ run(function()
 						end
 
 						if (not OtherProjectiles.Enabled) and not projmeta.projectile:find('arrow') then
+							return oldCalculateImportantLaunchValues(...)
+						end
+
+						if table.find(Blacklist.ListEnabled, projmeta.projectile) then
 							return oldCalculateImportantLaunchValues(...)
 						end
 
@@ -3118,7 +3135,17 @@ run(function()
 	TargetVisualiser = ProjectileAimbot:CreateToggle({Name = "Target Visualiser", Default = true})
 	OtherProjectiles = ProjectileAimbot:CreateToggle({
 		Name = 'Other Projectiles',
-		Default = true
+		Default = true,
+		Function = function(call)
+			if Blacklist then
+				Blacklist.Object.Visible = call
+			end
+		end
+	})
+	Blacklist = ProjectileAimbot:CreateTextList({
+		Name = 'Blacklist',
+		Darker = true,
+		Default = {'telepearl'}
 	})
 end)
 	
@@ -7616,6 +7643,19 @@ run(function()
 	LimitItem = Breaker:CreateToggle({
 		Name = 'Limit to items',
 		Tooltip = 'Only breaks when tools are held'
+	})
+end)
+
+run(function()
+	local a = {Enabled = false}
+	a = vape.Categories.World:CreateModule({
+		Name = "Leave Party",
+		Function = function(call)
+			if call then
+				a:Toggle(false)
+				game:GetService("ReplicatedStorage"):WaitForChild("events-@easy-games/lobby:shared/event/lobby-events@getEvents.Events"):WaitForChild("leaveParty"):FireServer()
+			end
+		end
 	})
 end)
 	
