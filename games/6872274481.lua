@@ -742,7 +742,7 @@ run(function()
 		DragonEndFly = debug.getproto(Knit.Controllers.VoidDragonController.flapWings, 1),
 		DragonFly = Knit.Controllers.VoidDragonController.flapWings,
 		DropItem = Knit.Controllers.ItemDropController.dropItemInHand,
-		EquipItem = canReq and debug.getproto(require(replicatedStorage.TS.entity.entities['inventory-entity']).InventoryEntity.equipItem, 3) or 'SetInvItem',
+		EquipItem = debug.getproto(require(replicatedStorage.TS.entity.entities['inventory-entity']).InventoryEntity.equipItem, 3),
 		FireProjectile = debug.getupvalue(Knit.Controllers.ProjectileController.launchProjectileWithValues, 2),
 		GroundHit = Knit.Controllers.FallDamageController.KnitStart,
 		GuitarHeal = Knit.Controllers.GuitarController.performHeal,
@@ -2863,27 +2863,28 @@ run(function()
 end)
 	
 run(function()
-	local oldCalculateImportantLaunchValues = nil
-	local hovering = false
+	local ProjectileAimbot
 	local TargetPart
 	local Targets
 	local FOV
 	local Range
 	local OtherProjectiles
+	local Blacklist
+	local TargetVisualiser
+
 	local rayCheck = RaycastParams.new()
 	rayCheck.FilterType = Enum.RaycastFilterType.Include
 	rayCheck.FilterDescendantsInstances = {workspace:FindFirstChild('Map') or workspace}
-	rayCheck.FilterDescendantsInstances = {workspace:FindFirstChild('Map')}
-	local old
+	local oldCalculateImportantLaunchValues = nil
+	
 	local selectedTarget = nil
 	local targetOutline = nil
+	local hovering = false
+	local CoreConnections = {}
 	
 	local UserInputService = game:GetService("UserInputService")
 	local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
-	local ProjectileAimbot = {Enabled = false}
-	local TargetVisualiser = {Enabled = false}
-	
 	local function updateOutline(target)
 		if targetOutline then
 			targetOutline:Destroy()
@@ -2899,15 +2900,12 @@ run(function()
 		end
 	end
 
-	local CoreConnections = {}
-	local Players = game:GetService("Players")
-	
 	local function handlePlayerSelection()
 		local mouse = lplr:GetMouse()
 		local function selectTarget(target)
 			if not target then return end
 			if target and target.Parent then
-				local plr = Players:GetPlayerFromCharacter(target.Parent)
+				local plr = playersService:GetPlayerFromCharacter(target.Parent)
 				if plr then
 					if selectedTarget == plr then
 						selectedTarget = nil
@@ -2935,15 +2933,14 @@ run(function()
 		end
 	end
 
-	local prediction = vape.Libraries.prediction
-	
-	ProjectileAimbot = vape.Categories.World:CreateModule({
+	ProjectileAimbot = vape.Categories.Blatant:CreateModule({
 		Name = 'ProjectileAimbot',
 		Function = function(callback)
 			if callback then
 				handlePlayerSelection()
-				local oldCalculateImportantLaunchValues = bedwars.ProjectileController.calculateImportantLaunchValues
-				bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
+				
+				oldCalculateImportantLaunchValues = bedwars.ProjectileController.calculateImportantLaunchValues
+				bedwars.ProjectileController.calculateImportantLaunchValues = function(...)	
 					hovering = true
 					local self, projmeta, worldmeta, origin, shootpos = ...
 					local originPos = entitylib.isAlive and (shootpos or entitylib.character.RootPart.Position) or Vector3.zero
@@ -2970,6 +2967,10 @@ run(function()
 						end
 
 						if (not OtherProjectiles.Enabled) and not projmeta.projectile:find('arrow') then
+							return oldCalculateImportantLaunchValues(...)
+						end
+
+						if table.find(Blacklist.ListEnabled, projmeta.projectile) then
 							return oldCalculateImportantLaunchValues(...)
 						end
 
@@ -3118,7 +3119,17 @@ run(function()
 	TargetVisualiser = ProjectileAimbot:CreateToggle({Name = "Target Visualiser", Default = true})
 	OtherProjectiles = ProjectileAimbot:CreateToggle({
 		Name = 'Other Projectiles',
-		Default = true
+		Default = true,
+		Function = function(call)
+			if Blacklist then
+				Blacklist.Object.Visible = call
+			end
+		end
+	})
+	Blacklist = ProjectileAimbot:CreateTextList({
+		Name = 'Blacklist',
+		Darker = true,
+		Default = {'telepearl'}
 	})
 end)
 	
@@ -3233,6 +3244,19 @@ run(function()
 		Default = 50,
 		Suffix = function(val)
 			return val == 1 and 'stud' or 'studs'
+		end
+	})
+end)
+
+run(function()
+	local a = {Enabled = false}
+	a = vape.Categories.World:CreateModule({
+		Name = "Leave Party",
+		Function = function(call)
+			if call then
+				a:Toggle(false)
+				game:GetService("ReplicatedStorage"):WaitForChild("events-@easy-games/lobby:shared/event/lobby-events@getEvents.Events"):WaitForChild("leaveParty"):FireServer()
+			end
 		end
 	})
 end)
@@ -7951,15 +7975,135 @@ run(function()
 	})
 end)
 	
+local HitFix = {}
 run(function()
-	vape.Legit:CreateModule({
-		Name = 'HitFix',
-		Function = function(callback)
-			debug.setconstant(bedwars.SwordController.swingSwordAtMouse, 23, callback and 'raycast' or 'Raycast')
-			debug.setupvalue(bedwars.SwordController.swingSwordAtMouse, 4, callback and bedwars.QueryUtil or workspace)
-		end,
-		Tooltip = 'Changes the raycast function to the correct one'
-	})
+    local originalFunctions = {}
+    local originalReachDistance = nil
+    local OldGet = nil
+    
+    local function getPingCompensation()
+        local ping = 0
+        pcall(function()
+            local stats = game:GetService("Stats")
+            ping = stats.Network.ServerStatsItem["Data Ping"]:GetValue() or 0
+        end)
+        return math.min(ping / 100, 1.5)
+    end
+
+    local function hookClientGet()
+        if not bedwars.Client or OldGet then return end
+        
+        OldGet = bedwars.Client.Get
+        bedwars.Client.Get = function(self, remoteName)
+            local call = OldGet(self, remoteName)
+            
+            if remoteName == "AttackEntity" then
+                return {
+                    instance = call.instance,
+                    SendToServer = function(_, attackTable, ...)
+                        if attackTable and attackTable.validate and HitFix.Enabled then
+                            local selfpos = attackTable.validate.selfPosition and attackTable.validate.selfPosition.value
+                            local targetpos = attackTable.validate.targetPosition and attackTable.validate.targetPosition.value
+                            
+                            if selfpos and targetpos then
+                                local distance = (selfpos - targetpos).Magnitude
+                                local pingCompensation = getPingCompensation()
+                                
+                                local adjustmentDistance = math.max(distance - 12, 0) + (pingCompensation * 2)
+                                
+                                if adjustmentDistance > 0 then
+                                    attackTable.validate.raycast = attackTable.validate.raycast or {}
+                                    local direction = CFrame.lookAt(selfpos, targetpos).LookVector
+                                    attackTable.validate.selfPosition.value = selfpos + (direction * adjustmentDistance)
+                                    
+                                    if pingCompensation > 1 then
+                                        attackTable.validate.targetPosition.value = targetpos - (direction * math.min(pingCompensation * 0.5, 3))
+                                    end
+                                end
+                            end
+                        end
+                        return call:SendToServer(attackTable, ...)
+                    end
+                }
+            end
+            
+            return call
+        end
+    end
+
+    local function applyFunctionHook(enabled)
+        if not bedwars.SwordController then return end
+        
+        local functions = {"swingSwordAtMouse", "swingSwordInRegion", "attackEntity"}
+        for _, funcName in pairs(functions) do
+            local original = bedwars.SwordController[funcName]
+            if original then
+                if enabled then
+                    if not originalFunctions[funcName] then
+                        originalFunctions[funcName] = original
+                        bedwars.SwordController[funcName] = function(self, ...)
+                            local args = {...}
+                            return original(self, unpack(args))
+                        end
+                    end
+                else
+                    if originalFunctions[funcName] then
+                        bedwars.SwordController[funcName] = originalFunctions[funcName]
+                        originalFunctions[funcName] = nil
+                    end
+                end
+            end
+        end
+    end
+
+    local function applyDebugPatch(enabled)
+        pcall(function()
+            if bedwars.SwordController and bedwars.SwordController.swingSwordAtMouse then
+                debug.setconstant(bedwars.SwordController.swingSwordAtMouse, 23, enabled and 'raycast' or 'Raycast')
+                debug.setupvalue(bedwars.SwordController.swingSwordAtMouse, 4, enabled and bedwars.QueryUtil or workspace)
+            end
+        end)
+    end
+
+    local function applyReach(enabled)
+        pcall(function()
+            if bedwars and bedwars.CombatConstant then
+                if enabled then
+                    if originalReachDistance == nil then
+                        originalReachDistance = bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE
+                    end
+                    local pingMultiplier = getPingCompensation()
+                    local additionalReach = 3 * pingMultiplier
+                    bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = 20 + math.min(additionalReach, 8)
+                else
+                    if originalReachDistance ~= nil then
+                        bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE = originalReachDistance
+                    end
+                end
+            end
+        end)
+    end
+
+    HitFix = vape.Categories.Blatant:CreateModule({
+        Name = 'HitFix',
+        Function = function(callback)
+            if callback then
+                hookClientGet()
+                applyFunctionHook(true)
+                applyDebugPatch(true)
+                applyReach(true)
+            else
+                if OldGet then
+                    bedwars.Client.Get = OldGet
+                    OldGet = nil
+                end
+                applyFunctionHook(false)
+                applyDebugPatch(false)
+                applyReach(false)
+            end
+        end,
+        Tooltip = 'Fixes hit registration and improves reach'
+    })
 end)
 	
 run(function()
