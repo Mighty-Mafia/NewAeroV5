@@ -13,9 +13,7 @@ end
 
 local function solveQuadric(c0, c1, c2)
 	local s0, s1
-
 	local p, q, D
-
 	p = c1 / (2 * c0)
 	q = c2 / c0
 	D = p * p - q
@@ -27,7 +25,6 @@ local function solveQuadric(c0, c1, c2)
 		return
 	else 
 		local sqrt_D = math.sqrt(D)
-
 		s0 = sqrt_D - p
 		s1 = -sqrt_D - p
 		return s0, s1
@@ -154,24 +151,23 @@ function module.solveQuartic(c0, c1, c2, c3, c4)
 		coeffs[0] = 1
 
 		if (num == 0) then
-			local results = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
-			num = num + #results
-			s0, s1 = results[1], results[2]
+			local results2 = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
+			num = num + #results2
+			s0, s1 = results2[1], results2[2]
 		end
 		if (num == 1) then
-			local results = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
-			num = num + #results
-			s1, s2 = results[1], results[2]
+			local results2 = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
+			num = num + #results2
+			s1, s2 = results2[1], results2[2]
 		end
 		if (num == 2) then
-			local results = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
-			num = num + #results
-			s2, s3 = results[1], results[2]
+			local results2 = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
+			num = num + #results2
+			s2, s3 = results2[1], results2[2]
 		end
 	end
 
 	sub = 0.25 * A
-
 	if (num > 0) then s0 = s0 - sub end
 	if (num > 1) then s1 = s1 - sub end
 	if (num > 2) then s2 = s2 - sub end
@@ -189,14 +185,15 @@ function module.SolveTrajectory(origin, projectileSpeed, gravity, targetPos, tar
 	if math.abs(q) > 0.01 and playerGravity and playerGravity > 0 then
 		local estTime = (disp.Magnitude / projectileSpeed)
 		local origq = q
-		local origj = j
 		for i = 1, 100 do
-			q -= (.5 * playerGravity) * estTime
+			q = origq - (.5 * playerGravity) * estTime
 			local velo = targetVelocity * 0.016
-			local ray = workspace.Raycast(workspace, Vector3.new(targetPos.X, targetPos.Y, targetPos.Z), Vector3.new(velo.X, (q * estTime) - playerHeight, velo.Z), params)
+			local ray = workspace:Raycast(Vector3.new(targetPos.X, targetPos.Y, targetPos.Z), 
+				Vector3.new(velo.X, (q * estTime) - playerHeight, velo.Z), params)
+			
 			if ray then
 				local newTarget = ray.Position + Vector3.new(0, playerHeight, 0)
-				estTime -= math.sqrt(((targetPos - newTarget).Magnitude * 2) / playerGravity)
+				estTime = estTime - math.sqrt(((targetPos - newTarget).Magnitude * 2) / playerGravity)
 				targetPos = newTarget
 				j = (targetPos - origin).Y
 				q = 0
@@ -214,14 +211,16 @@ function module.SolveTrajectory(origin, projectileSpeed, gravity, targetPos, tar
 		2*j*q + 2*h*p + 2*k*r,
 		j*j + h*h + k*k
 	)
+	
 	if solutions then
-		local posRoots = table.create(2)
+		local posRoots = {}
 		for _, v in solutions do
 			if v > 0 then
 				table.insert(posRoots, v)
 			end
 		end
 		posRoots[1] = posRoots[1]
+
 		if posRoots[1] then
 			local t = posRoots[1]
 			local d = (h + p*t)/t
