@@ -1,4 +1,5 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
+--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -771,10 +772,17 @@ run(function()
 		return ind and tab[ind + 1] or ''
 	end
 
+	local preDumped = {
+		EquipItem = 'SetInvItem'
+	}
+
 	for i, v in remoteNames do
 		local remote = dumpRemote(debug.getconstants(v))
 		if remote == '' then
-			notif('Vape', 'Failed to grab remote ('..i..')', 10, 'alert')
+			if not preDumped[i] then
+				notif('Vape', 'Failed to grab remote ('..i..')', 10, 'alert')
+			end
+			remote = preDumped[i] or ''
 		end
 		remotes[i] = remote
 	end
@@ -2815,8 +2823,6 @@ run(function()
                     PromptButtonHoldBegan = ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
                         fireproximityprompt(prompt)
                     end)
-
-                    InstantPP:Clean(PromptButtonHoldBegan)
                 else
                     errorNotification('InstantPP', 'Your exploit does not support this command (missing fireproximityprompt)', 5)
                     InstantPP:Toggle()
@@ -3134,10 +3140,60 @@ run(function()
 end)
 	
 run(function()
+	local shooting, old = false
+	
+	local function getCrossbows()
+		local crossbows = {}
+		for i, v in store.inventory.hotbar do
+			if v.item and v.item.itemType:find('crossbow') and i ~= (store.inventory.hotbarSlot + 1) then table.insert(crossbows, i - 1) end
+		end
+		return crossbows
+	end
+	
+	vape.Categories.Utility:CreateModule({
+		Name = 'AutoShoot',
+		Function = function(callback)
+			if callback then
+				old = bedwars.ProjectileController.createLocalProjectile
+				bedwars.ProjectileController.createLocalProjectile = function(...)
+					local source, data, proj = ...
+					if source and (proj == 'arrow' or proj == 'fireball') and not shooting then
+						task.spawn(function()
+							local bows = getCrossbows()
+							if #bows > 0 then
+								shooting = true
+								task.wait(0.15)
+								local selected = store.inventory.hotbarSlot
+								for _, v in getCrossbows() do
+									if hotbarSwitch(v) then
+										task.wait(0.05)
+										mouse1click()
+										task.wait(0.05)
+									end
+								end
+								hotbarSwitch(selected)
+								shooting = false
+							end
+						end)
+					end
+					return old(...)
+				end
+			else
+				bedwars.ProjectileController.createLocalProjectile = old
+			end
+		end,
+		Tooltip = 'Automatically crossbow macro\'s'
+	})
+	
+end)
+
+run(function()
 	local ProjectileAura
 	local Targets
 	local Range
 	local List
+	local HandCheck
+	local FireSpeed
 	local rayCheck = RaycastParams.new()
 	rayCheck.FilterType = Enum.RaycastFilterType.Include
 	local projectileRemote = {InvokeServer = function() end}
@@ -3176,6 +3232,13 @@ run(function()
 		Function = function(callback)
 			if callback then
 				repeat
+					local holdingCrossbow = store.hand and store.hand.tool and store.hand.tool.Name:find('crossbow')
+					
+					if HandCheck.Enabled and not holdingCrossbow then
+						task.wait(0.1)
+						continue
+					end
+					
 					if (workspace:GetServerTimeNow() - bedwars.SwordController.lastAttack) > 0.5 then
 						local ent = entitylib.EntityPosition({
 							Part = 'RootPart',
@@ -3201,6 +3264,12 @@ run(function()
 										task.spawn(function()
 											local dir, id = CFrame.lookAt(pos, calc).LookVector, httpService:GenerateGUID(true)
 											local shootPosition = (CFrame.new(pos, calc) * CFrame.new(Vector3.new(-bedwars.BowConstantsTable.RelX, -bedwars.BowConstantsTable.RelY, -bedwars.BowConstantsTable.RelZ))).Position
+											
+											local shootAnim = bedwars.ItemMeta[item.tool.Name].thirdPerson and bedwars.ItemMeta[item.tool.Name].thirdPerson.shootAnimation
+											if shootAnim then
+												bedwars.GameAnimationUtil:playAnimation(lplr, shootAnim)
+											end
+											
 											bedwars.ProjectileController:createLocalProjectile(meta, ammo, projectile, shootPosition, id, dir * projSpeed, {drawDurationSeconds = 1})
 											local res = projectileRemote:InvokeServer(item.tool, ammo, projectile, shootPosition, pos, dir * projSpeed, id, {drawDurationSeconds = 1, shotId = httpService:GenerateGUID(false)}, workspace:GetServerTimeNow() - 0.045)
 											if not res then
@@ -3214,7 +3283,7 @@ run(function()
 											end
 										end)
 	
-										FireDelays[item.itemType] = tick() + itemMeta.fireDelaySec
+										FireDelays[item.itemType] = tick() + (itemMeta.fireDelaySec / FireSpeed.Value)
 										if switched then
 											task.wait(0.05)
 										end
@@ -3245,6 +3314,19 @@ run(function()
 		Suffix = function(val)
 			return val == 1 and 'stud' or 'studs'
 		end
+	})
+	HandCheck = ProjectileAura:CreateToggle({
+		Name = 'Hand Check',
+		Default = false,
+		Tooltip = 'Only shoot when holding a crossbow'
+	})
+	FireSpeed = ProjectileAura:CreateSlider({
+		Name = 'Fire Speed',
+		Min = 0.5,
+		Max = 3,
+		Default = 1,
+		Decimal = 10,
+		Tooltip = 'Lower = faster, Higher = slower. 1.0 = normal speed'
 	})
 end)
 
@@ -4707,54 +4789,6 @@ run(function()
 		Name = 'Random',
 		Tooltip = 'Chooses a random mode'
 	})
-end)
-	
-run(function()
-	local shooting, old = false
-	
-	local function getCrossbows()
-		local crossbows = {}
-		for i, v in store.inventory.hotbar do
-			if v.item and v.item.itemType:find('crossbow') and i ~= (store.inventory.hotbarSlot + 1) then table.insert(crossbows, i - 1) end
-		end
-		return crossbows
-	end
-	
-	vape.Categories.Utility:CreateModule({
-		Name = 'AutoShoot',
-		Function = function(callback)
-			if callback then
-				old = bedwars.ProjectileController.createLocalProjectile
-				bedwars.ProjectileController.createLocalProjectile = function(...)
-					local source, data, proj = ...
-					if source and (proj == 'arrow' or proj == 'fireball') and not shooting then
-						task.spawn(function()
-							local bows = getCrossbows()
-							if #bows > 0 then
-								shooting = true
-								task.wait(0.15)
-								local selected = store.inventory.hotbarSlot
-								for _, v in getCrossbows() do
-									if hotbarSwitch(v) then
-										task.wait(0.05)
-										mouse1click()
-										task.wait(0.05)
-									end
-								end
-								hotbarSwitch(selected)
-								shooting = false
-							end
-						end)
-					end
-					return old(...)
-				end
-			else
-				bedwars.ProjectileController.createLocalProjectile = old
-			end
-		end,
-		Tooltip = 'Automatically crossbow macro\'s'
-	})
-	
 end)
 	
 run(function()
