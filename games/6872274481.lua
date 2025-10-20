@@ -45,11 +45,14 @@ local prediction = vape.Libraries.prediction
 local getfontsize = vape.Libraries.getfontsize
 local getcustomasset = vape.Libraries.getcustomasset
 
+
 local store = {
 	attackReach = 0,
 	attackReachUpdate = tick(),
+	damage = {},
 	damageBlockFail = tick(),
 	hand = {},
+	localHand = {},
 	inventory = {
 		inventory = {
 			items = {},
@@ -5797,68 +5800,254 @@ run(function()
 end)
 	
 run(function()
-	local BedProtector
-	
-	local function getBedNear()
-		local localPosition = entitylib.isAlive and entitylib.character.RootPart.Position or Vector3.zero
-		for _, v in collectionService:GetTagged('bed') do
-			if (localPosition - v.Position).Magnitude < 20 and v:GetAttribute('Team'..(lplr:GetAttribute('Team') or -1)..'NoBreak') then
-				return v
+    local BedProtector
+	local Priority
+	local Layers 
+	local CPS 
+
+	local BlockTypeCheck 
+	local AutoSwitch 
+	local HandCheck 
+    
+    local function getBedNear()
+        local localPosition = entitylib.isAlive and entitylib.character.RootPart.Position or Vector3.zero
+        for _, v in collectionService:GetTagged('bed') do
+            if (localPosition - v.Position).Magnitude < 20 and v:GetAttribute('Team'..(lplr:GetAttribute('Team') or -1)..'NoBreak') then
+                return v
+            end
+        end
+    end
+
+	local function isAllowed(block)
+		if not BlockTypeCheck.Enabled then return true end
+		local allowed = {"wool", "stone_brick", "wood_plank_oak", "ceramic", "obsidian"}
+		for i,v in pairs(allowed) do
+			if string.find(string.lower(tostring(block)), v) then 
+				return true
 			end
 		end
+		return false
 	end
-	
+
 	local function getBlocks()
-		local blocks = {}
+        local blocks = {}
 		for _, item in store.inventory.inventory.items do
-			local block = bedwars.ItemMeta[item.itemType].block
-			if block then
-				table.insert(blocks, {item.itemType, block.health})
-			end
-		end
-		table.sort(blocks, function(a, b) 
-			return a[2] > b[2]
-		end)
-		return blocks
-	end
-	
-	local function getPyramid(size, grid)
-		local positions = {}
-		for h = size, 0, -1 do
-			for w = h, 0, -1 do
-				table.insert(positions, Vector3.new(w, (size - h), ((h + 1) - w)) * grid)
-				table.insert(positions, Vector3.new(w * -1, (size - h), ((h + 1) - w)) * grid)
-				table.insert(positions, Vector3.new(w, (size - h), (h - w) * -1) * grid)
-				table.insert(positions, Vector3.new(w * -1, (size - h), (h - w) * -1) * grid)
-			end
-		end
-		return positions
-	end
-	
-	BedProtector = vape.Categories.World:CreateModule({
-		Name = 'BedProtector',
-		Function = function(callback)
-			if callback then
-				local bed = getBedNear()
-				bed = bed and bed.Position or nil
-				if bed then
-					for i, block in getBlocks() do
-						for _, pos in getPyramid(i, 3) do
-							if not BedProtector.Enabled then break end
-							if getPlacedBlock(bed + pos) then continue end
-							bedwars.placeBlock(bed + pos, block[1], false)
-						end
-					end
-					if BedProtector.Enabled then 
-						BedProtector:Toggle() 
-					end
-				else
-					notif('BedProtector', 'Unable to locate bed', 5)
-					BedProtector:Toggle()
+            local block = bedwars.ItemMeta[item.itemType].block
+            if block and isAllowed(item.itemType) then
+                table.insert(blocks, {itemType = item.itemType, health = block.health, tool = item.tool})
+            end
+        end
+
+        local priorityMap = {}
+        for i, v in pairs(Priority.ListEnabled) do
+			local core = v:split("/")
+            local blockType, layer = core[1], core[2]
+            if blockType and layer then
+                priorityMap[blockType] = tonumber(layer)
+            end
+        end
+
+        local prioritizedBlocks = {}
+        local fallbackBlocks = {}
+
+        for _, block in pairs(blocks) do
+			local prioLayer
+			for i,v in pairs(priorityMap) do
+				if string.find(string.lower(tostring(block.itemType)), string.lower(tostring(i))) then
+					prioLayer = v
+					break
 				end
 			end
-		end,
-		Tooltip = 'Automatically places strong blocks around the bed.'
+            if prioLayer then
+                table.insert(prioritizedBlocks, {itemType = block.itemType, health = block.health, layer = prioLayer, tool = block.tool})
+            else
+                table.insert(fallbackBlocks, {itemType = block.itemType, health = block.health, tool = block.tool})
+            end
+        end
+
+        table.sort(prioritizedBlocks, function(a, b)
+            return a.layer < b.layer
+        end)
+
+        table.sort(fallbackBlocks, function(a, b)
+            return a.health > b.health
+        end)
+
+        local finalBlocks = {}
+        for _, block in pairs(prioritizedBlocks) do
+            table.insert(finalBlocks, {block.itemType, block.health})
+        end
+        for _, block in pairs(fallbackBlocks) do
+            table.insert(finalBlocks, {block.itemType, block.health})
+        end
+
+        return finalBlocks
+    end
+    
+    local function getPyramid(size, grid)
+        local positions = {}
+        for h = size, 0, -1 do
+            for w = h, 0, -1 do
+                table.insert(positions, Vector3.new(w, (size - h), ((h + 1) - w)) * grid)
+                table.insert(positions, Vector3.new(w * -1, (size - h), ((h + 1) - w)) * grid)
+                table.insert(positions, Vector3.new(w, (size - h), (h - w) * -1) * grid)
+                table.insert(positions, Vector3.new(w * -1, (size - h), (h - w) * -1) * grid)
+            end
+        end
+        return positions
+    end
+
+    local function tblClone(cltbl)
+        local restbl = table.clone(cltbl)
+        for i, v in pairs(cltbl) do
+            table.insert(restbl, v)
+        end
+        return restbl
+    end
+
+    local function cleantbl(restbl, req)
+        for i = #restbl, req + 1, -1 do
+            table.remove(restbl, i)
+        end
+        return restbl
+    end
+
+    local res_attempts = 0
+    
+    local function buildProtection(bedPos, blocks, layers, cps)
+        local delay = 1 / cps 
+        local blockIndex = 1
+        local posIndex = 1
+        
+        local function placeNextBlock()
+            if not BedProtector.Enabled or blockIndex > layers then
+                BedProtector:Toggle()
+                return
+            end
+
+            local block = blocks[blockIndex]
+            if not block then
+                BedProtector:Toggle()
+                return
+            end
+
+			if AutoSwitch.Enabled then
+				switchItem(block.tool)
+			end
+
+            local positions = getPyramid(blockIndex - 1, 3) 
+            if posIndex > #positions then
+                blockIndex = blockIndex + 1
+                posIndex = 1
+                task.delay(delay, placeNextBlock)
+                return
+            end
+
+            local pos = positions[posIndex]
+            if not getPlacedBlock(bedPos + pos) then
+                bedwars.placeBlock(bedPos + pos, block[1], false)
+            end
+            
+            posIndex = posIndex + 1
+            task.delay(delay, placeNextBlock)
+        end
+        
+        placeNextBlock()
+    end
+    
+	BedProtector = vape.Categories.World:CreateModule({
+        Name = 'BedProtector',
+        Function = function(callback)
+            if callback then
+                local bed = getBedNear()
+                local bedPos = bed and bed.Position
+                if bedPos then
+
+					if HandCheck.Enabled and not AutoSwitch.Enabled then
+						if not (store.hand and store.hand.toolType == "block") then
+							errorNotification("BedProtector | Hand Check", "You aren't holding a block!", 1.5)
+							BedProtector:Toggle()
+							return
+						end
+					end
+
+                    local blocks = getBlocks()
+                    if #blocks == 0 then 
+                        warningNotification("BedProtector", "No blocks for bed defense found!", 3) 
+						BedProtector:Toggle()
+                        return 
+                    end
+                    
+                    if #blocks < Layers.Value then
+                        repeat 
+                            blocks = tblClone(blocks)
+                            blocks = cleantbl(blocks, Layers.Value)
+                            task.wait()
+                            res_attempts = res_attempts + 1
+                        until #blocks == Layers.Value or res_attempts > (Layers.Value < 10 and Layers.Value or 10)
+                    elseif #blocks > Layers.Value then
+                        blocks = cleantbl(blocks, Layers.Value)
+                    end
+                    res_attempts = 0
+                    
+                    buildProtection(bedPos, blocks, Layers.Value, CPS.Value)
+                else
+                    notif('BedProtector', 'Please get closer to your bed!', 5)
+                    BedProtector:Toggle()
+                end
+            else
+                res_attempts = 0
+            end
+        end,
+        Tooltip = 'Automatically places strong blocks around the bed with customizable speed.'
+    })
+
+    Layers = BedProtector:CreateSlider({
+        Name = "Layers",
+        Function = function() end,
+        Min = 1,
+        Max = 10,
+        Default = 2,
+    	Tooltip = "Number of protective layers around the bed"
+    })
+
+    CPS = BedProtector:CreateSlider({
+        Name = "CPS",
+        Function = function() end,
+        Min = 5,
+        Max = 50,
+        Default = 50,
+       	Tooltip = "Blocks placed per second"
+    })
+
+	AutoSwitch = BedProtector:CreateToggle({
+		Name = "Auto Switch",
+		Function = function() end,
+		Default = true
+	})
+
+	HandCheck = BedProtector:CreateToggle({
+		Name = "Hand Check",
+		Function = function() end
+	})
+
+	BlockTypeCheck = BedProtector:CreateToggle({
+		Name = "Block Type Check",
+		Function = function() end,
+		Default = true
+	})
+
+	Priority = BedProtector:CreateTextList({
+		Name = "Block/Layer",
+		Function = function() end,
+		TempText = "block/layer",
+		SortFunction = function(a, b)
+			local layer1 = a:split("/")
+			local layer2 = b:split("/")
+			layer1 = #layer1 and tonumber(layer1[2]) or 1
+			layer2 = #layer2 and tonumber(layer2[2]) or 1
+			return layer1 < layer2
+		end
 	})
 end)
 	
@@ -9046,7 +9235,6 @@ run(function()
 	})
 end)
 	
--- WinEffect Module
 run(function()
     local WinEffect
     local List
@@ -9084,7 +9272,6 @@ run(function()
     })
 end)
 
--- AC MOD View Module
 run(function()
     local KnitInit, Knit
     repeat
