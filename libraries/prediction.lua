@@ -1,8 +1,7 @@
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local module = {}
 
 local movementHistory = {}
-local historySize = 15
+local historySize = 10
 
 local eps = 1e-9
 local function isZero(d)
@@ -25,7 +24,7 @@ local function solveQuadric(c0, c1, c2)
 		return s0
 	elseif (D < 0) then
 		return
-	else
+	else 
 		local sqrt_D = math.sqrt(D)
 		s0 = sqrt_D - p
 		s1 = -sqrt_D - p
@@ -190,9 +189,9 @@ function module.SolveTrajectory(origin, projectileSpeed, gravity, targetPos, tar
 		for i = 1, 100 do
 			q = origq - (.5 * playerGravity) * estTime
 			local velo = targetVelocity * 0.016
-			local ray = workspace:Raycast(Vector3.new(targetPos.X, targetPos.Y, targetPos.Z),
+			local ray = workspace:Raycast(Vector3.new(targetPos.X, targetPos.Y, targetPos.Z), 
 				Vector3.new(velo.X, (q * estTime) - playerHeight, velo.Z), params)
-
+			
 			if ray then
 				local newTarget = ray.Position + Vector3.new(0, playerHeight, 0)
 				estTime = estTime - math.sqrt(((targetPos - newTarget).Magnitude * 2) / playerGravity)
@@ -213,7 +212,7 @@ function module.SolveTrajectory(origin, projectileSpeed, gravity, targetPos, tar
 		2*j*q + 2*h*p + 2*k*r,
 		j*j + h*h + k*k
 	)
-
+	
 	if solutions then
 		local posRoots = {}
 		for _, v in solutions do
@@ -221,6 +220,7 @@ function module.SolveTrajectory(origin, projectileSpeed, gravity, targetPos, tar
 				table.insert(posRoots, v)
 			end
 		end
+		table.sort(posRoots)
 		posRoots[1] = posRoots[1]
 
 		if posRoots[1] then
@@ -237,94 +237,135 @@ function module.SolveTrajectory(origin, projectileSpeed, gravity, targetPos, tar
 		local f = (k + r*t)/t
 		return origin + Vector3.new(d, e, f)
 	end
+	
+	return targetPos
 end
 
 function module.predictStrafingMovement(targetPlayer, targetPart, projSpeed, gravity, origin)
-	if not targetPlayer or not targetPlayer.Character or not targetPart then
+	if not targetPlayer or not targetPlayer.Character or not targetPart then 
 		return targetPart and targetPart.Position or Vector3.zero
 	end
-
+	
 	local currentPos = targetPart.Position
 	local currentVel = targetPart.Velocity
 	local distance = (currentPos - origin).Magnitude
-
+	
 	local baseTimeToTarget = distance / projSpeed
-	local velocityMagnitude = Vector3.new(currentVel.X, 0, currentVel.Z).Magnitude
-	local verticalVel = currentVel.Y
-
+	
 	local timeMultiplier = 1.0
-	if distance > 80 then
-		timeMultiplier = 0.95
+	if distance > 120 then
+		timeMultiplier = 0.88
+	elseif distance > 80 then
+		timeMultiplier = 0.92
 	elseif distance > 50 then
-		timeMultiplier = 0.98
-	elseif distance < 20 then
-		timeMultiplier = 1.08
-	end
-
-	local timeToTarget = baseTimeToTarget * timeMultiplier
-
-	local horizontalPredictionStrength = 0.80
-	if distance > 70 then
-		horizontalPredictionStrength = 0.70
-	elseif distance > 40 then
-		horizontalPredictionStrength = 0.75
+		timeMultiplier = 0.96
+	elseif distance < 15 then
+		timeMultiplier = 1.15
 	elseif distance < 25 then
-		horizontalPredictionStrength = 0.88
+		timeMultiplier = 1.10
 	end
-
+	
+	local timeToTarget = baseTimeToTarget * timeMultiplier
+	
+	local horizontalPredictionStrength = 0.85
+	if distance > 90 then
+		horizontalPredictionStrength = 0.72
+	elseif distance > 60 then
+		horizontalPredictionStrength = 0.78
+	elseif distance > 30 then
+		horizontalPredictionStrength = 0.82
+	elseif distance < 20 then
+		horizontalPredictionStrength = 0.90
+	end
+	
 	local horizontalVel = Vector3.new(currentVel.X, 0, currentVel.Z)
 	local predictedHorizontal = horizontalVel * timeToTarget * horizontalPredictionStrength
-
+	
 	local verticalPrediction = 0
-	local isJumping = verticalVel > 10
-	local isFalling = verticalVel < -15
-	local isPeaking = math.abs(verticalVel) < 3 and verticalVel < 1
-
+	local verticalVel = currentVel.Y
+	
+	local isJumping = verticalVel > 22
+	local isFalling = verticalVel < -28
+	local isPeaking = math.abs(verticalVel) < 5 and verticalVel < 2
+	
 	if isFalling then
-		verticalPrediction = verticalVel * timeToTarget * 0.32
+		verticalPrediction = verticalVel * timeToTarget * 0.45 + (-196.2 * 0.5 * timeToTarget * timeToTarget * 0.1)
 	elseif isJumping then
-		verticalPrediction = verticalVel * timeToTarget * 0.28
+		verticalPrediction = verticalVel * timeToTarget * 0.35 + (-196.2 * 0.5 * timeToTarget * timeToTarget * 0.05)
 	elseif isPeaking then
-		verticalPrediction = -2 * timeToTarget
+		verticalPrediction = -4.5 * timeToTarget
 	else
-		verticalPrediction = verticalVel * timeToTarget * 0.25
+		verticalPrediction = verticalVel * timeToTarget * 0.30
 	end
-
-	local strafingDirection = Vector3.new(math.random(-1, 1), 0, math.random(-1, 1)).Unit
-	local strafingMagnitude = 2 * math.sin(timeToTarget * 3.14)
-	local strafingPrediction = strafingDirection * strafingMagnitude
-
-	local finalPosition = currentPos + predictedHorizontal + Vector3.new(0, verticalPrediction, 0) + strafingPrediction
-
+	
+	local finalPosition = currentPos + predictedHorizontal + Vector3.new(0, verticalPrediction, 0)
+	
+	local rayOrigin = currentPos + Vector3.new(0, 2, 0)
+	local rayDirection = (finalPosition - rayOrigin)
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+	raycastParams.FilterDescendantsInstances = {targetPlayer.Character}
+	
+	local rayResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+	if rayResult then
+		finalPosition = rayResult.Position - (rayDirection.Unit * 3)
+	end
+	
 	return finalPosition
 end
 
 function module.smoothAim(currentCFrame, targetPosition, distance)
-	local smoothnessFactor = 0.85
-
-	if distance > 70 then
-		smoothnessFactor = 0.75
+	local smoothnessFactor = 0.78
+	
+	if distance > 100 then
+		smoothnessFactor = 0.65
+	elseif distance > 70 then
+		smoothnessFactor = 0.70
 	elseif distance > 40 then
-		smoothnessFactor = 0.80
-	elseif distance < 20 then
-		smoothnessFactor = 0.92
+		smoothnessFactor = 0.75
+	elseif distance < 15 then
+		smoothnessFactor = 0.85
+	elseif distance < 25 then
+		smoothnessFactor = 0.82
 	end
-
+	
+	smoothnessFactor = math.clamp(smoothnessFactor, 0.1, 0.95)
+	
 	return currentCFrame:Lerp(CFrame.new(currentCFrame.Position, targetPosition), smoothnessFactor)
 end
 
 function module.updateMovementHistory(targetPart)
-	table.insert(movementHistory, 1, {Position = targetPart.Position, Velocity = targetPart.Velocity})
-	if #movementHistory > historySize then
+	if not targetPart then return end
+	table.insert(movementHistory, 1, {
+		Position = targetPart.Position, 
+		Velocity = targetPart.Velocity,
+		Time = tick()
+	})
+	
+	while #movementHistory > historySize do
 		table.remove(movementHistory)
 	end
 end
 
 function module.predictMovementBasedOnHistory()
-	local lastPosition = movementHistory[1].Position
-	local lastVelocity = movementHistory[1].Velocity
-	local prediction = lastPosition + lastVelocity * 0.1 
-	return prediction
+	if #movementHistory < 2 then
+		return nil
+	end
+	
+	local totalVelocity = Vector3.zero
+	local count = 0
+	
+	for i = 1, math.min(3, #movementHistory) do
+		totalVelocity = totalVelocity + movementHistory[i].Velocity
+		count = count + 1
+	end
+	
+	if count > 0 then
+		local averageVelocity = totalVelocity / count
+		return movementHistory[1].Position + (averageVelocity * 0.2)
+	end
+	
+	return nil
 end
 
 module.movementHistory = movementHistory
