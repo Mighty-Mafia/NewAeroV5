@@ -1208,6 +1208,10 @@ for _, v in {'AntiRagdoll', 'TriggerBot', 'SilentAim', 'AutoRejoin', 'Rejoin', '
 	vape:Remove(v)
 end
 run(function()
+	local function isFirstPerson()
+		if not (lplr.Character and lplr.Character:FindFirstChild("Head")) then return nil end
+		return (lplr.Character.Head.Position - gameCamera.CFrame.Position).Magnitude < 2
+	end
 	local AimAssist
 	local Targets
 	local Sort
@@ -1217,23 +1221,42 @@ run(function()
 	local StrafeIncrease
 	local KillauraTarget
 	local ClickAim
+	local ShopCheck
+	local FirstPersonCheck
 	
 	AimAssist = vape.Categories.Combat:CreateModule({
 		Name = 'AimAssist',
 		Function = function(callback)
 			if callback then
 				AimAssist:Clean(runService.Heartbeat:Connect(function(dt)
-					if entitylib.isAlive and store.hand.toolType == 'sword' and ((not ClickAim.Enabled) or (tick() - bedwars.SwordController.lastSwing) < 0.4) then
-						local ent = not KillauraTarget.Enabled and entitylib.EntityPosition({
+					if entitylib.isAlive and store.hand.toolType == 'sword' and ((not ClickAim.Enabled) or (workspace:GetServerTimeNow() - bedwars.SwordController.lastAttack) < 0.4) then
+						local ent = KillauraTarget.Enabled and store.KillauraTarget or entitylib.EntityPosition({
 							Range = Distance.Value,
 							Part = 'RootPart',
 							Wallcheck = Targets.Walls.Enabled,
 							Players = Targets.Players.Enabled,
 							NPCs = Targets.NPCs.Enabled,
 							Sort = sortmethods[Sort.Value]
-						}) or store.KillauraTarget
+						})
 	
 						if ent then
+							if FirstPersonCheck.Enabled then
+								if not isFirstPerson() then return end
+							end
+							if ShopCheck.Enabled then
+								local isShop = lplr:FindFirstChild("PlayerGui") and lplr:FindFirstChild("PlayerGui"):FindFirstChild("ItemShop") or nil
+								if isShop then return end
+							end
+							pcall(function()
+								local plr = ent
+								vapeTargetInfo.Targets.AimAssist = {
+									Humanoid = {
+										Health = (plr.Character:GetAttribute("Health") or plr.Humanoid.Health) + getShieldAttribute(plr.Character),
+										MaxHealth = plr.Character:GetAttribute("MaxHealth") or plr.Humanoid.MaxHealth
+									},
+									Player = plr.Player
+								}
+							end)
 							local delta = (ent.RootPart.Position - entitylib.character.RootPart.Position)
 							local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
 							local angle = math.acos(localfacing:Dot((delta * Vector3.new(1, 0, 1)).Unit))
@@ -1248,7 +1271,7 @@ run(function()
 		Tooltip = 'Smoothly aims to closest valid target with sword'
 	})
 	Targets = AimAssist:CreateTargets({
-		Players = true,
+		Players = true, 
 		Walls = true
 	})
 	local methods = {'Damage', 'Distance'}
@@ -1272,8 +1295,8 @@ run(function()
 		Min = 1,
 		Max = 30,
 		Default = 30,
-		Suffx = function(val)
-			return val == 1 and 'stud' or 'studs'
+		Suffx = function(val) 
+			return val == 1 and 'stud' or 'studs' 
 		end
 	})
 	AngleSlider = AimAssist:CreateSlider({
@@ -1288,6 +1311,16 @@ run(function()
 	})
 	KillauraTarget = AimAssist:CreateToggle({
 		Name = 'Use killaura target'
+	})
+	ShopCheck = AimAssist:CreateToggle({
+		Name = "Shop Check",
+		Function = function() end,
+		Default = false
+	})
+	FirstPersonCheck = AimAssist:CreateToggle({
+		Name = "First Person Check",
+		Function = function() end,
+		Default = false
 	})
 	StrafeIncrease = AimAssist:CreateToggle({Name = 'Strafe increase'})
 end)
@@ -2027,9 +2060,12 @@ run(function()
 	local AnimationTween
 	local Limit
 	local LegitAura
+	local SwingTime
+	local SwingTimeSlider
 	local Particles, Boxes = {}, {}
 	local anims, AnimDelay, AnimTween, armC0 = vape.Libraries.auraanims, tick()
 	local AttackRemote
+	local lastAttackTime = 0
 	task.spawn(function()
 		AttackRemote = bedwars.Client:Get(remotes.AttackEntity)
 	end)
@@ -2130,6 +2166,7 @@ run(function()
 			if callback then
 				lastSwingServerTime = Workspace:GetServerTimeNow()
                 lastSwingServerTimeDelta = 0
+				lastAttackTime = 0
 				
 				if RangeCircle.Enabled then
 					createRangeCircle()
@@ -2158,8 +2195,6 @@ run(function()
 							}
 						}
 					}
-					--debug.setupvalue(bedwars.SwordController.playSwordEffect, 6, fake)
-					--debug.setupvalue(bedwars.ScytheController.playLocalAnimation, 3, fake)
 
 					task.spawn(function()
 						local started = false
@@ -2209,7 +2244,14 @@ run(function()
 					Attacking = false
 					store.KillauraTarget = nil
 					pcall(function() vapeTargetInfo.Targets.Killaura = nil end)
-					if sword then
+					
+					local canAttack = true
+					if SwingTime.Enabled then
+						local swingSpeed = SwingTimeSlider.Value
+						canAttack = (tick() - lastAttackTime) >= swingSpeed
+					end
+					
+					if sword and canAttack then
 						if sigridcheck and entitylib.isAlive and lplr.Character:FindFirstChild("elk") then return end
 						local isClaw = string.find(string.lower(tostring(sword and sword.itemType or "")), "summoner_claw")
 						local plrs = entitylib.AllPosition({
@@ -2251,7 +2293,8 @@ run(function()
 									store.KillauraTarget = v
 									if not isClaw then
 										if not Swing.Enabled and AnimDelay <= tick() and not LegitAura.Enabled then
-											AnimDelay = tick() + (meta.sword.respectAttackSpeedForEffects and meta.sword.attackSpeed or 0.25)
+											local swingSpeed = SwingTime.Enabled and SwingTimeSlider.Value or (meta.sword.respectAttackSpeedForEffects and meta.sword.attackSpeed or 0.25)
+											AnimDelay = tick() + swingSpeed
 											bedwars.SwordController:playSwordEffect(meta, false)
 											if meta.displayName:find(' Scythe') then
 												bedwars.ScytheController:playLocalAnimation()
@@ -2279,6 +2322,9 @@ run(function()
 
 									store.attackReach = (delta.Magnitude * 100) // 1 / 100
 									store.attackReachUpdate = tick() + 1
+									
+									lastAttackTime = tick()
+									
 									if isClaw then
 										KaidaController:request(v.Character)
 									else
@@ -2337,8 +2383,6 @@ run(function()
 						lplr.PlayerGui.MobileUI['2'].Visible = true
 					end)
 				end
-				--debug.setupvalue(bedwars.SwordController.playSwordEffect, 6, bedwars.Knit)
-				--debug.setupvalue(bedwars.ScytheController.playLocalAnimation, 3, bedwars.Knit)
 				Attacking = false
 				if armC0 then
 					AnimTween = tweenService:Create(gameCamera.Viewmodel.RightHand.RightWrist, TweenInfo.new(AnimationTween.Enabled and 0.001 or 0.3, Enum.EasingStyle.Exponential), {
@@ -2430,6 +2474,20 @@ run(function()
 	Mouse = Killaura:CreateToggle({Name = 'Require mouse down'})
 	Swing = Killaura:CreateToggle({Name = 'No Swing'})
 	GUI = Killaura:CreateToggle({Name = 'GUI check'})
+	SwingTime = Killaura:CreateToggle({
+		Name = 'Custom Swing Time',
+		Function = function(callback)
+			SwingTimeSlider.Object.Visible = callback
+		end
+	})
+	SwingTimeSlider = Killaura:CreateSlider({
+		Name = 'Swing Time',
+		Min = 0,
+		Max = 1,
+		Default = 0.25,
+		Decimal = 100,
+		Visible = false
+	})
 	Killaura:CreateToggle({
 		Name = 'Show target',
 		Function = function(callback)
