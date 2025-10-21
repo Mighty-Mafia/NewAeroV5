@@ -1,5 +1,6 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
+--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -2063,12 +2064,15 @@ run(function()
 	local AnimationTween
 	local Limit
 	local LegitAura
+	local lastAttackTime = 0
+	local lastManualSwing = 0
+	local lastSwingServerTime = 0
+	local lastSwingServerTimeDelta = 0
 	local SwingTime
 	local SwingTimeSlider
 	local Particles, Boxes = {}, {}
 	local anims, AnimDelay, AnimTween, armC0 = vape.Libraries.auraanims, tick()
 	local AttackRemote
-	local lastAttackTime = 0
 	task.spawn(function()
 		AttackRemote = bedwars.Client:Get(remotes.AttackEntity)
 	end)
@@ -2151,11 +2155,25 @@ run(function()
 			if store.hand.toolType ~= 'sword' or bedwars.DaoController.chargingMaid then return false end
 		end
 
+		local canAttack = true
+		
 		if LegitAura.Enabled then
-			if workspace:GetServerTimeNow() - bedwars.SwordController.lastAttack > 0.2 then return false end
+			local isSwinging = inputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+			
+			local timeSinceLastSwing = workspace:GetServerTimeNow() - bedwars.SwordController.lastAttack
+			local recentlySwung = timeSinceLastSwing < 0.3
+			
+			if not isSwinging and not recentlySwung then
+				canAttack = false
+			end
+		end
+		
+		if SwingTime.Enabled and canAttack then
+			local swingSpeed = SwingTimeSlider.Value
+			canAttack = (tick() - lastAttackTime) >= swingSpeed
 		end
 
-		return sword, meta
+		return sword, meta, canAttack
 	end
 
 	local OneTapCooldown = {Value = 5}
@@ -2243,17 +2261,11 @@ run(function()
 							TweenService:Create(RangeCirclePart, TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {Position = entitylib.character.HumanoidRootPart.Position - Vector3.new(0, entitylib.character.Humanoid.HipHeight, 0)}):Play()
 						end
 					end)
-					local attacked, sword, meta = {}, getAttackData()
+					local attacked, sword, meta, canAttack = {}, getAttackData()
 					Attacking = false
 					store.KillauraTarget = nil
 					pcall(function() vapeTargetInfo.Targets.Killaura = nil end)
-					
-					local canAttack = true
-					if SwingTime.Enabled then
-						local swingSpeed = SwingTimeSlider.Value
-						canAttack = (tick() - lastAttackTime) >= swingSpeed
-					end
-					
+
 					if sword and canAttack then
 						if sigridcheck and entitylib.isAlive and lplr.Character:FindFirstChild("elk") then return end
 						local isClaw = string.find(string.lower(tostring(sword and sword.itemType or "")), "summoner_claw")
@@ -2296,13 +2308,18 @@ run(function()
 									store.KillauraTarget = v
 									if not isClaw then
 										if not Swing.Enabled and AnimDelay <= tick() and not LegitAura.Enabled then
-											local swingSpeed = SwingTime.Enabled and SwingTimeSlider.Value or (meta.sword.respectAttackSpeedForEffects and meta.sword.attackSpeed or 0.25)
+											local swingSpeed = 0.25
+											if SwingTime.Enabled then
+												swingSpeed = SwingTimeSlider.Value
+											elseif meta.sword.respectAttackSpeedForEffects then
+												swingSpeed = meta.sword.attackSpeed
+											end
 											AnimDelay = tick() + swingSpeed
 											bedwars.SwordController:playSwordEffect(meta, false)
 											if meta.displayName:find(' Scythe') then
 												bedwars.ScytheController:playLocalAnimation()
 											end
-	
+
 											if vape.ThreadFix then
 												setthreadidentity(8)
 											end
@@ -2318,10 +2335,10 @@ run(function()
 									local pos = selfpos + dir * math.max(delta.Magnitude - 14.399, 0)
 
 									bedwars.SwordController.lastAttack = workspace:GetServerTimeNow()
-                                    bedwars.SwordController.lastSwingServerTime = workspace:GetServerTimeNow()
+									bedwars.SwordController.lastSwingServerTime = workspace:GetServerTimeNow()
 
 									lastSwingServerTimeDelta = workspace:GetServerTimeNow() - lastSwingServerTime
-                                    lastSwingServerTime = workspace:GetServerTimeNow()
+									lastSwingServerTime = workspace:GetServerTimeNow()
 
 									store.attackReach = (delta.Magnitude * 100) // 1 / 100
 									store.attackReachUpdate = tick() + 1
@@ -2686,6 +2703,7 @@ run(function()
 		end
 	})
 end)
+
 	
 run(function()
 	local Value
@@ -3328,7 +3346,7 @@ run(function()
 	})
 end)
 	
-run(function()
+--[[run(function()
 	local shooting, old = false
 	
 	local function getCrossbows()
@@ -3374,7 +3392,7 @@ run(function()
 		Tooltip = 'Automatically crossbow macro\'s'
 	})
 	
-end)
+end)--]]
 
 run(function()
 	local ProjectileAura
