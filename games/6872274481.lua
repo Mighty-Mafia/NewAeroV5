@@ -7159,7 +7159,9 @@ run(function()
 					type = 'BedwarsAddItemPurchased',
 					itemType = item.itemType
 				})
-				bedwars.BedwarsShopController.alreadyPurchasedMap[item.itemType] = true
+				if not (item.consumable or item.itemType == 'arrow' or item.itemType:find('arrow')) then
+					bedwars.BedwarsShopController.alreadyPurchasedMap[item.itemType] = true
+				end
 			end
 		end)
 		currencytable[item.currency] -= item.price
@@ -7370,6 +7372,10 @@ run(function()
 		Default = true,
 		Tooltip = 'Buys iron armor before iron axe'
 	})
+	local KeepBuying = AutoBuy:CreateToggle({
+		Name = 'Keep Buying',
+		Tooltip = 'Always buys the set amount from item list, ignoring current inventory'
+	})
 	AutoBuy:CreateTextList({
 		Name = 'Item',
 		Placeholder = 'priority/item/amount/after',
@@ -7385,13 +7391,29 @@ run(function()
 	
 						local v = bedwars.Shop.getShopItem(tab[2], lplr)
 						if v then
-							local item = getItem(tab[2] == 'wool_white' and bedwars.Shop.getTeamWool(lplr:GetAttribute('Team')) or tab[2])
-							item = (item and tonumber(tab[3]) - item.amount or tonumber(tab[3])) // v.amount
-							if item > 0 and canBuy(v, currencytable, item) then
-								for _ = 1, item do
-									buyItem(v, currencytable)
+							if KeepBuying.Enabled then
+								local purchasesNeeded = math.ceil(tonumber(tab[3]) / v.amount)
+								
+								if purchasesNeeded > 0 and canBuy(v, currencytable, purchasesNeeded) then
+									for _ = 1, purchasesNeeded do
+										buyItem(v, currencytable)
+									end
+									return true
 								end
-								return true
+							else
+								local item = getItem(tab[2] == 'wool_white' and bedwars.Shop.getTeamWool(lplr:GetAttribute('Team')) or tab[2])
+								local currentAmount = item and item.amount or 0
+								local targetAmount = tonumber(tab[3])
+								local needToBuy = math.max(0, targetAmount - currentAmount)
+								
+								local purchasesNeeded = math.ceil(needToBuy / v.amount)
+								
+								if purchasesNeeded > 0 and canBuy(v, currencytable, purchasesNeeded) then
+									for _ = 1, purchasesNeeded do
+										buyItem(v, currencytable)
+									end
+									return true
+								end
 							end
 						end
 					end
