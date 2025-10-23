@@ -7159,9 +7159,6 @@ run(function()
 					type = 'BedwarsAddItemPurchased',
 					itemType = item.itemType
 				})
-				if not (item.consumable or item.itemType == 'arrow' or item.itemType:find('arrow')) then
-					bedwars.BedwarsShopController.alreadyPurchasedMap[item.itemType] = true
-				end
 			end
 		end)
 		currencytable[item.currency] -= item.price
@@ -7374,11 +7371,16 @@ run(function()
 	})
 	local KeepBuying = AutoBuy:CreateToggle({
 		Name = 'Keep Buying',
-		Tooltip = 'Always buys the set amount from item list, ignoring current inventory'
+		Tooltip = 'Always buys the set amount from item list, ignoring current inventory',
+		Function = function(callback)
+			if callback then
+				npctick = tick()
+			end
+		end
 	})
 	AutoBuy:CreateTextList({
 		Name = 'Item',
-		Placeholder = 'priority/item/amount/after',
+		Placeholder = 'priority/item/amount/skip50',
 		Function = function(list)
 			table.clear(Custom)
 			table.clear(CustomPost)
@@ -7386,36 +7388,65 @@ run(function()
 				local tab = entry:split('/')
 				local ind = tonumber(tab[1])
 				if ind then
-					(tab[4] and CustomPost or Custom)[ind] = function(currencytable, shop)
+					local isPost = tab[4] and tab[4]:lower():find('after')
+					local skipAmount = tab[4] and tonumber(tab[4]:match('%d+')) or nil
+					
+					(isPost and CustomPost or Custom)[ind] = function(currencytable, shop)
 						if not shop then return end
-	
-						local v = bedwars.Shop.getShopItem(tab[2], lplr)
-						if v then
-							if KeepBuying.Enabled then
-								local purchasesNeeded = math.ceil(tonumber(tab[3]) / v.amount)
-								
-								if purchasesNeeded > 0 and canBuy(v, currencytable, purchasesNeeded) then
-									for _ = 1, purchasesNeeded do
-										buyItem(v, currencytable)
-									end
-									return true
-								end
-							else
-								local item = getItem(tab[2] == 'wool_white' and bedwars.Shop.getTeamWool(lplr:GetAttribute('Team')) or tab[2])
-								local currentAmount = item and item.amount or 0
-								local targetAmount = tonumber(tab[3])
-								local needToBuy = math.max(0, targetAmount - currentAmount)
-								
-								local purchasesNeeded = math.ceil(needToBuy / v.amount)
-								
-								if purchasesNeeded > 0 and canBuy(v, currencytable, purchasesNeeded) then
-									for _ = 1, purchasesNeeded do
-										buyItem(v, currencytable)
-									end
-									return true
-								end
+						if not store.shopLoaded then return end
+						
+						local success, v = pcall(function()
+							return bedwars.Shop.getShopItem(tab[2], lplr)
+						end)
+						
+						if not success or not v then
+							return false
+						end
+						
+						local item = getItem(tab[2] == 'wool_white' and bedwars.Shop.getTeamWool(lplr:GetAttribute('Team')) or tab[2])
+						local currentAmount = item and item.amount or 0
+						local targetAmount = tonumber(tab[3])
+						
+						if tab[2] == 'arrow' and skipAmount then
+							local hasBow = getBow()
+							local hasCrossbow = getItem('crossbow')
+							local hasHeadhunter = getItem('headhunter_bow')
+							if not (hasBow or hasCrossbow or hasHeadhunter) then
+								return false
 							end
 						end
+						
+						if KeepBuying.Enabled then
+							local purchasesNeeded = math.ceil(targetAmount / v.amount)
+							
+							if purchasesNeeded > 0 and canBuy(v, currencytable, purchasesNeeded) then
+								for _ = 1, purchasesNeeded do
+									buyItem(v, currencytable)
+								end
+								return true
+							end
+						else
+							local needToBuy = math.max(0, targetAmount - currentAmount)
+							
+							if needToBuy <= 0 then
+								return false
+							end
+
+							if skipAmount and currentAmount >= skipAmount then
+								return false
+							end
+							
+							local purchasesNeeded = math.ceil(needToBuy / v.amount)
+							
+							if canBuy(v, currencytable, purchasesNeeded) then
+								for _ = 1, purchasesNeeded do
+									buyItem(v, currencytable)
+								end
+								return true
+							end
+						end
+						
+						return false
 					end
 				end
 			end
