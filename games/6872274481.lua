@@ -2155,25 +2155,31 @@ run(function()
 			if store.hand.toolType ~= 'sword' or bedwars.DaoController.chargingMaid then return false end
 		end
 
-		local canAttack = true
-		
 		if LegitAura.Enabled then
 			local isSwinging = inputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
-			
 			local timeSinceLastSwing = workspace:GetServerTimeNow() - bedwars.SwordController.lastAttack
 			local recentlySwung = timeSinceLastSwing < 0.3
-			
 			if not isSwinging and not recentlySwung then
-				canAttack = false
+				return false
 			end
 		end
-		
-		if SwingTime.Enabled and canAttack then
-			local swingSpeed = SwingTimeSlider.Value
-			canAttack = (tick() - lastAttackTime) >= swingSpeed
-		end
 
-		return sword, meta, canAttack
+		if SwingTime.Enabled then
+			local swingSpeed = SwingTimeSlider.Value
+			return sword, meta, (tick() - lastAttackTime) >= swingSpeed
+		else
+			return sword, meta, true
+		end
+	end
+
+	local function handleGrandKillauraCooldown(delta)
+		if SwingTime.Enabled then
+			if delta.Magnitude < 14.4 and (tick() - swingCooldown) < math.max(SwingTimeSlider.Value, 0.02) then 
+				return false 
+			end
+			swingCooldown = tick()
+		end
+		return true
 	end
 
 	local OneTapCooldown = {Value = 5}
@@ -2310,7 +2316,7 @@ run(function()
 										if not Swing.Enabled and AnimDelay <= tick() and not LegitAura.Enabled then
 											local swingSpeed = 0.25
 											if SwingTime.Enabled then
-												swingSpeed = SwingTimeSlider.Value
+												swingSpeed = math.max(SwingTimeSlider.Value, 0.11)
 											elseif meta.sword.respectAttackSpeedForEffects then
 												swingSpeed = meta.sword.attackSpeed
 											end
@@ -2343,8 +2349,14 @@ run(function()
 									store.attackReach = (delta.Magnitude * 100) // 1 / 100
 									store.attackReachUpdate = tick() + 1
 									
-									lastAttackTime = tick()
-									
+									if SwingTime.Enabled then
+										lastAttackTime = tick()
+										
+										if delta.Magnitude < 14.4 and SwingTimeSlider.Value > 0.11 then
+											AnimDelay = tick()
+										end
+									end
+
 									if isClaw then
 										KaidaController:request(v.Character)
 									else
@@ -2504,7 +2516,7 @@ run(function()
 		Name = 'Swing Time',
 		Min = 0,
 		Max = 1,
-		Default = 0.25,
+		Default = 0.42,
 		Decimal = 100,
 		Visible = false
 	})
