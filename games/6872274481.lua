@@ -2036,6 +2036,7 @@ run(function()
 	})
 end)
 	
+local Attacking
 run(function()
 	local Killaura
 	local Targets
@@ -2078,7 +2079,8 @@ run(function()
 
 	local attackQueue = {}
 	local lastServerAttack = 0
-	local SERVER_COOLDOWN = 
+	local SERVER_COOLDOWN = 0 
+	local pingCompensation = true 
 
 	local function calculateExtendedAttackPosition(selfPos, targetPos, desiredRange)
 		local currentDistance = (selfPos - targetPos).Magnitude
@@ -2105,7 +2107,7 @@ run(function()
 		if not AttackRemote then return end
 		
 		local currentTime = tick()
-		if (currentTime - lastServerAttack) < SERVER_COOLDOWN then
+		if SERVER_COOLDOWN > 0 and (currentTime - lastServerAttack) < SERVER_COOLDOWN then
 			return 
 		end
 		lastServerAttack = currentTime
@@ -2116,6 +2118,20 @@ run(function()
 
 		local selfpos = attackTable.validate.selfPosition.value
 		local targetpos = attackTable.validate.targetPosition.value
+		
+		if pingCompensation and attackTable.entityInstance then
+			local targetRoot = attackTable.entityInstance:FindFirstChild("HumanoidRootPart")
+			if targetRoot then
+				local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() / 1000
+				local velocity = targetRoot.AssemblyLinearVelocity
+				
+				if velocity.Magnitude > 1 then
+					local predictedOffset = velocity * math.min(ping * 1.5, 0.3) 
+					targetpos = targetpos + predictedOffset
+					attackTable.validate.targetPosition.value = targetpos
+				end
+			end
+		end
 		
 		store.attackReach = ((selfpos - targetpos).Magnitude * 100) // 1 / 100
 		store.attackReachUpdate = tick() + 1
