@@ -2036,7 +2036,6 @@ run(function()
 	})
 end)
 	
-local Attacking
 run(function()
 	local Killaura
 	local Targets
@@ -2077,8 +2076,39 @@ run(function()
 		AttackRemote = bedwars.Client:Get(remotes.AttackEntity)
 	end)
 
+	local attackQueue = {}
+	local lastServerAttack = 0
+	local SERVER_COOLDOWN = 
+
+	local function calculateExtendedAttackPosition(selfPos, targetPos, desiredRange)
+		local currentDistance = (selfPos - targetPos).Magnitude
+		if currentDistance <= desiredRange then
+			return selfPos, targetPos
+		end
+		
+		local direction = (targetPos - selfPos).Unit
+		local extendedSelfPos = targetPos - (direction * math.max(desiredRange - 0.1, 14.3))
+		
+		local raycastParams = RaycastParams.new()
+		raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+		raycastParams.FilterDescendantsInstances = {lplr.Character}
+		
+		local raycastResult = workspace:Raycast(selfPos, (extendedSelfPos - selfPos), raycastParams)
+		if raycastResult then
+			extendedSelfPos = raycastResult.Position - (direction * 1)
+		end
+		
+		return extendedSelfPos, targetPos
+	end
+
 	local function FireAttackRemote(attackTable, ...)
 		if not AttackRemote then return end
+		
+		local currentTime = tick()
+		if (currentTime - lastServerAttack) < SERVER_COOLDOWN then
+			return 
+		end
+		lastServerAttack = currentTime
 		
 		local suc, plr = pcall(function()
 			return playersService:GetPlayerFromCharacter(attackTable.entityInstance)
@@ -2086,12 +2116,32 @@ run(function()
 
 		local selfpos = attackTable.validate.selfPosition.value
 		local targetpos = attackTable.validate.targetPosition.value
+		
 		store.attackReach = ((selfpos - targetpos).Magnitude * 100) // 1 / 100
 		store.attackReachUpdate = tick() + 1
 
-		if Reach.Enabled or HitBoxes.Enabled then
-			attackTable.validate.raycast = attackTable.validate.raycast or {}
-			attackTable.validate.selfPosition.value += CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
+		local actualDistance = (selfpos - targetpos).Magnitude
+		local attackRangeValue = AttackRange.Value
+		
+		if actualDistance > 14.4 and actualDistance <= attackRangeValue then
+			local newSelfPos, newTargetPos = calculateExtendedAttackPosition(selfpos, targetpos, math.min(actualDistance, 14.4))
+			
+			attackTable.validate.selfPosition.value = newSelfPos
+			attackTable.validate.targetPosition.value = newTargetPos
+			
+			if Reach.Enabled or HitBoxes.Enabled then
+				attackTable.validate.raycast = attackTable.validate.raycast or {}
+				local lookDirection = CFrame.lookAt(newSelfPos, newTargetPos).LookVector
+				attackTable.validate.raycast.cameraPosition = attackTable.validate.raycast.cameraPosition or {}
+				attackTable.validate.raycast.cameraPosition.value = newSelfPos
+				attackTable.validate.raycast.cursorDirection = attackTable.validate.raycast.cursorDirection or {}
+				attackTable.validate.raycast.cursorDirection.value = lookDirection
+			end
+		elseif actualDistance <= 14.4 then
+			if Reach.Enabled or HitBoxes.Enabled then
+				attackTable.validate.raycast = attackTable.validate.raycast or {}
+				attackTable.validate.selfPosition.value += CFrame.lookAt(selfpos, targetpos).LookVector * math.max((selfpos - targetpos).Magnitude - 14.399, 0)
+			end
 		end
 
 		if suc and plr then
@@ -2100,9 +2150,6 @@ run(function()
 
 		return AttackRemote:SendToServer(attackTable, ...)
 	end
-
-	local lastSwingServerTime = 0
-	local lastSwingServerTimeDelta = 0
 
 	local function createRangeCircle()
 		local suc, err = pcall(function()
@@ -2172,18 +2219,7 @@ run(function()
 		end
 	end
 
-	local function handleGrandKillauraCooldown(delta)
-		if SwingTime.Enabled then
-			if delta.Magnitude < 14.4 and (tick() - swingCooldown) < math.max(SwingTimeSlider.Value, 0.02) then 
-				return false 
-			end
-			swingCooldown = tick()
-		end
-		return true
-	end
-
 	local OneTapCooldown = {Value = 5}
-
 	local preserveSwordIcon = false
 	local sigridcheck = false
 
@@ -2192,8 +2228,9 @@ run(function()
 		Function = function(callback)
 			if callback then
 				lastSwingServerTime = Workspace:GetServerTimeNow()
-                lastSwingServerTimeDelta = 0
+				lastSwingServerTimeDelta = 0
 				lastAttackTime = 0
+				lastServerAttack = 0
 				
 				if RangeCircle.Enabled then
 					createRangeCircle()
@@ -2205,24 +2242,6 @@ run(function()
 				end
 
 				if Animation.Enabled and not (identifyexecutor and table.find({'Argon', 'Delta'}, ({identifyexecutor()})[1])) then
-					local fake = {
-						Controllers = {
-							ViewmodelController = {
-								isVisible = function()
-									return not Attacking
-								end,
-								playAnimation = function(...)
-									local args = {...}
-									if not Attacking then
-										pcall(function()
-											bedwars.ViewmodelController:playAnimation(select(2, unpack(args)))
-										end)
-									end
-								end
-							}
-						}
-					}
-
 					task.spawn(function()
 						local started = false
 						repeat
@@ -2338,8 +2357,9 @@ run(function()
 								local actualRoot = v.Character.PrimaryPart
 								if actualRoot then
 									local dir = CFrame.lookAt(selfpos, actualRoot.Position).LookVector
-									local pos = selfpos + dir * math.max(delta.Magnitude - 14.399, 0)
-
+									local pos = selfpos
+									local targetPos = actualRoot.Position
+									
 									bedwars.SwordController.lastAttack = workspace:GetServerTimeNow()
 									bedwars.SwordController.lastSwingServerTime = workspace:GetServerTimeNow()
 
@@ -2369,7 +2389,7 @@ run(function()
 													cameraPosition = {value = pos},
 													cursorDirection = {value = dir}
 												},
-												targetPosition = {value = actualRoot.Position},
+												targetPosition = {value = targetPos},
 												selfPosition = {value = pos}
 											}
 										})
@@ -2404,6 +2424,7 @@ run(function()
 				until not Killaura.Enabled
 			else
 				store.KillauraTarget = nil
+				lastServerAttack = 0
 				for _, v in Boxes do
 					v.Adornee = nil
 				end
@@ -2452,8 +2473,8 @@ run(function()
 	SwingRange = Killaura:CreateSlider({
 		Name = 'Swing range',
 		Min = 1,
-		Max = 18,
-		Default = 18,
+		Max = 35,
+		Default = 20,
 		Suffix = function(val)
 			return val == 1 and 'stud' or 'studs'
 		end
@@ -2461,8 +2482,8 @@ run(function()
 	AttackRange = Killaura:CreateSlider({
 		Name = 'Attack range',
 		Min = 1,
-		Max = 18,
-		Default = 18,
+		Max = 35,
+		Default = 20,
 		Suffix = function(val)
 			return val == 1 and 'stud' or 'studs'
 		end
