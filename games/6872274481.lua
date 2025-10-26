@@ -2078,7 +2078,7 @@ run(function()
 
 	local attackQueue = {}
 	local lastServerAttack = 0
-	local SERVER_COOLDOWN = 
+	local SERVER_COOLDOWN = 0 
 
 	local function calculateExtendedAttackPosition(selfPos, targetPos, desiredRange)
 		local currentDistance = (selfPos - targetPos).Magnitude
